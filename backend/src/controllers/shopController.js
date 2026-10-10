@@ -1,26 +1,31 @@
 const pool = require("../config/database");
 
 // Get all active barber shops
+
 const getShops = async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT
-          id,
-          owner_id,
-          name,
-          description,
-          phone,
-          email,
-          address,
-          city,
-          logo_url,
-          cover_image_url,
-          primary_color,
-          is_active,
-          created_at
-       FROM barber_shops
-       WHERE is_active = TRUE
-       ORDER BY created_at DESC`,
+          bs.id,
+          bs.owner_id,
+          u.name AS owner_name,
+          u.email AS owner_email,
+          u.phone AS owner_phone,
+          bs.name,
+          bs.description,
+          bs.phone,
+          bs.email,
+          bs.address,
+          bs.city,
+          bs.logo_url,
+          bs.cover_image_url,
+          bs.primary_color,
+          bs.is_active,
+          bs.created_at
+       FROM barber_shops bs
+       LEFT JOIN users u ON u.id = bs.owner_id
+       WHERE bs.is_active = TRUE
+       ORDER BY bs.created_at DESC`,
     );
 
     return res.status(200).json({

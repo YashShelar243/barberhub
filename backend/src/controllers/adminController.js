@@ -102,7 +102,97 @@ const createOwner = async (req, res) => {
     });
   }
 };
+const getAllShops = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+          bs.id,
+          bs.owner_id,
+          bs.name,
+          bs.description,
+          bs.phone,
+          bs.email,
+          bs.address,
+          bs.city,
+          bs.logo_url,
+          bs.cover_image_url,
+          bs.primary_color,
+          bs.is_active,
+          bs.created_at,
+          u.name AS owner_name,
+          u.email AS owner_email,
+          u.phone AS owner_phone
+       FROM barber_shops bs
+       LEFT JOIN users u ON u.id = bs.owner_id
+       ORDER BY bs.created_at DESC`,
+    );
+
+    return res.status(200).json({
+      success: true,
+      count: result.rows.length,
+      shops: result.rows,
+    });
+  } catch (error) {
+    console.error("Get all shops error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to fetch barber shops.",
+    });
+  }
+};
+
+const updateShopStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { is_active } = req.body;
+
+    if (!/^\d+$/.test(id) || Number(id) <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid shop ID.",
+      });
+    }
+
+    if (typeof is_active !== "boolean") {
+      return res.status(400).json({
+        success: false,
+        message: "is_active must be true or false.",
+      });
+    }
+
+    const result = await pool.query(
+      `UPDATE barber_shops
+       SET is_active = $1
+       WHERE id = $2
+       RETURNING id, name, is_active`,
+      [is_active, id],
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Barber shop not found.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Shop ${is_active ? "activated" : "deactivated"} successfully.`,
+      shop: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Update shop status error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to update shop status.",
+    });
+  }
+};
 
 module.exports = {
   createOwner,
+  getAllShops,
+  updateShopStatus,
 };
