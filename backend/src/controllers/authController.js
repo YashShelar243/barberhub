@@ -217,7 +217,98 @@ const login = async (req, res) => {
   }
 };
 
+const updateProfile = async (req, res) => {
+  try {
+    const { name, email, phone } = req.body;
+    const userId = req.user.id;
+
+    if (
+      (name !== undefined && (typeof name !== "string" || !name.trim())) ||
+      (email !== undefined && (typeof email !== "string" || !email.trim())) ||
+      (phone !== undefined && (typeof phone !== "string" || !phone.trim()))
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Name, email, and phone cannot be empty.",
+      });
+    }
+
+    if (name !== undefined && name.trim().length > 100) {
+      return res.status(400).json({
+        success: false,
+        message: "Name cannot exceed 100 characters.",
+      });
+    }
+
+    const cleanEmail =
+      email === undefined ? undefined : email.trim().toLowerCase();
+
+    if (
+      cleanEmail !== undefined &&
+      (cleanEmail.length > 150 ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail))
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Please enter a valid email address.",
+      });
+    }
+
+    const cleanPhone = phone === undefined ? undefined : phone.trim();
+
+    if (cleanPhone !== undefined && !/^\d{10,15}$/.test(cleanPhone)) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone must contain 10 to 15 digits.",
+      });
+    }
+
+    const result = await pool.query(
+      `UPDATE users
+       SET name = COALESCE($1, name),
+           email = COALESCE($2, email),
+           phone = COALESCE($3, phone)
+       WHERE id = $4
+       RETURNING id, name, email, phone, role, is_active, created_at`,
+      [
+        name === undefined ? null : name.trim(),
+        cleanEmail ?? null,
+        cleanPhone ?? null,
+        userId,
+      ],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "User profile not found.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Profile updated successfully.",
+      user: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Update profile error:", error.message);
+
+    if (error.code === "23505") {
+      return res.status(409).json({
+        success: false,
+        message: "Email or phone number is already registered.",
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to update your profile.",
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
+  updateProfile,
 };

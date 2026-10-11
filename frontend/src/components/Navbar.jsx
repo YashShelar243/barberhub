@@ -13,6 +13,7 @@ const navigationByRole = {
     { label: "Dashboard", path: "/owner/dashboard" },
     { label: "Manage Services", path: "/owner/services" },
     { label: "Manage Appointments", path: "/owner/appointments" },
+    { label: "My Profile", path: "/owner/profile" },
   ],
   admin: [{ label: "Dashboard", path: "/admin/dashboard" }],
 };

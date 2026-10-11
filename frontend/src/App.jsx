@@ -13,10 +13,12 @@ import AdminDashboard from "./pages/admin/AdminDashboard";
 import OwnerDashboard from "./pages/owner/OwnerDashboard";
 import OwnerAppointments from "./pages/owner/OwnerAppointments";
 import OwnerServices from "./pages/owner/OwnerServices";
+import OwnerProfile from "./pages/owner/OwnerProfile";
 
 import CustomerDashboard from "./pages/customer/CustomerDashboard";
 import CustomerShops from "./pages/customer/CustomerShops";
 import CustomerAppointments from "./pages/customer/CustomerAppointments";
+import ShopDetails from "./pages/customer/ShopDetails";
 
 function AppRoutes() {
   return (
@@ -39,6 +41,7 @@ function AppRoutes() {
             path="/customer/appointments"
             element={<CustomerAppointments />}
           />
+          <Route path="/customer/shops/:shopId" element={<ShopDetails />} />
         </Route>
 
         {/* Owner routes */}
@@ -46,6 +49,7 @@ function AppRoutes() {
           <Route path="/owner/dashboard" element={<OwnerDashboard />} />
           <Route path="/owner/appointments" element={<OwnerAppointments />} />
           <Route path="/owner/services" element={<OwnerServices />} />
+          <Route path="/owner/profile" element={<OwnerProfile />} />
         </Route>
 
         {/* Admin routes */}
