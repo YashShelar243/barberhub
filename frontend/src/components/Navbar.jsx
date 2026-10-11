@@ -1,134 +1,151 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+import { useTheme } from "../context/ThemeContext";
 
-function Navbar() {
-  const [isOpen, setIsOpen] = useState(false);
+const navigationByRole = {
+  customer: [
+    { label: "Dashboard", path: "/customer/dashboard" },
+    { label: "Explore Shops", path: "/customer/shops" },
+    { label: "My Appointments", path: "/customer/appointments" },
+  ],
+  owner: [
+    { label: "Dashboard", path: "/owner/dashboard" },
+    { label: "Manage Services", path: "/owner/services" },
+    { label: "Manage Appointments", path: "/owner/appointments" },
+  ],
+  admin: [{ label: "Dashboard", path: "/admin/dashboard" }],
+};
+
+export default function Navbar() {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const { user, logout } = useAuth();
+  const { isDark, toggleTheme } = useTheme();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const links = navigationByRole[user?.role] || [];
+
+  function handleLogout() {
+    setMenuOpen(false);
+    logout();
+    navigate("/login", { replace: true });
+  }
+
+  function isActive(path) {
+    return location.pathname === path;
+  }
 
   return (
-    <nav className="sticky top-0 z-50 border-b border-slate-200 bg-white">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-        {/* Logo */}
+    <header className="sticky top-0 z-40 border-b border-gray-200 bg-white text-gray-900 shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
         <Link
-          to="/"
-          className="text-2xl font-bold text-blue-600"
-          onClick={() => setIsOpen(false)}
+          to={
+            user?.role === "owner"
+              ? "/owner/dashboard"
+              : user?.role === "admin"
+                ? "/admin/dashboard"
+                : user?.role === "customer"
+                  ? "/customer/dashboard"
+                  : "/login"
+          }
+          className="shrink-0 text-2xl font-bold text-blue-600 dark:text-blue-400"
+          onClick={() => setMenuOpen(false)}
         >
           BarberHub
         </Link>
 
-        {/* Desktop Navigation */}
-        <div className="hidden items-center gap-8 md:flex">
-          <Link
-            to="/"
-            className="font-medium text-slate-700 transition hover:text-blue-600"
-          >
-            Home
-          </Link>
-
-          <Link
-            to="/shops"
-            className="font-medium text-slate-700 transition hover:text-blue-600"
-          >
-            Barber Shops
-          </Link>
-
-          <Link
-            to="/login"
-            className="font-medium text-slate-700 transition hover:text-blue-600"
-          >
-            Login
-          </Link>
-
-          <Link
-            to="/register"
-            className="rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white transition hover:bg-blue-700"
-          >
-            Register
-          </Link>
-        </div>
-
-        {/* Mobile Menu Button */}
-        <button
-          type="button"
-          onClick={() => setIsOpen(!isOpen)}
-          className="rounded-lg p-2 text-slate-700 hover:bg-slate-100 md:hidden"
-          aria-label="Toggle navigation menu"
-          aria-expanded={isOpen}
-        >
-          {isOpen ? (
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-6 w-6"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
+        <nav className="hidden items-center gap-2 md:flex">
+          {links.map((item) => (
+            <Link
+              key={item.path}
+              to={item.path}
+              className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
+                isActive(item.path)
+                  ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                  : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+              }`}
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
-          ) : (
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-6 w-6"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={toggleTheme}
+            aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-lg transition hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800"
+          >
+            {isDark ? "☀️" : "🌙"}
+          </button>
+
+          {user && (
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="hidden rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium transition hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800 sm:inline-flex"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M4 6h16M4 12h16M4 18h16"
-              />
-            </svg>
+              Logout
+            </button>
           )}
-        </button>
+
+          <button
+            type="button"
+            onClick={() => setMenuOpen((open) => !open)}
+            aria-label={
+              menuOpen ? "Close navigation menu" : "Open navigation menu"
+            }
+            aria-expanded={menuOpen}
+            aria-controls="mobile-navigation"
+            className="inline-flex items-center justify-center rounded-lg border border-gray-300 p-2 text-xl transition hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800 md:hidden"
+          >
+            {menuOpen ? "✕" : "☰"}
+          </button>
+        </div>
       </div>
 
-      {/* Mobile Navigation */}
-      {isOpen && (
-        <div className="border-t border-slate-200 bg-white md:hidden">
-          <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6">
-            <Link
-              to="/"
-              onClick={() => setIsOpen(false)}
-              className="block rounded-lg px-4 py-3 font-medium text-slate-700 hover:bg-slate-100"
-            >
-              Home
-            </Link>
+      {menuOpen && (
+        <nav
+          id="mobile-navigation"
+          className="border-t border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900 md:hidden"
+        >
+          <div className="mx-auto flex max-w-7xl flex-col gap-2">
+            {user?.name && (
+              <p className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+                Signed in as {user.name}
+              </p>
+            )}
 
-            <Link
-              to="/shops"
-              onClick={() => setIsOpen(false)}
-              className="block rounded-lg px-4 py-3 font-medium text-slate-700 hover:bg-slate-100"
-            >
-              Barber Shops
-            </Link>
+            {links.map((item) => (
+              <Link
+                key={item.path}
+                to={item.path}
+                onClick={() => setMenuOpen(false)}
+                className={`rounded-lg px-3 py-3 text-sm font-medium transition ${
+                  isActive(item.path)
+                    ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                    : "text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                }`}
+              >
+                {item.label}
+              </Link>
+            ))}
 
-            <Link
-              to="/login"
-              onClick={() => setIsOpen(false)}
-              className="block rounded-lg px-4 py-3 font-medium text-slate-700 hover:bg-slate-100"
-            >
-              Login
-            </Link>
-
-            <Link
-              to="/register"
-              onClick={() => setIsOpen(false)}
-              className="mt-2 block rounded-lg bg-blue-600 px-4 py-3 text-center font-semibold text-white hover:bg-blue-700"
-            >
-              Register
-            </Link>
+            {user && (
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="mt-1 rounded-lg border border-gray-300 px-3 py-3 text-left text-sm font-medium hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800"
+              >
+                Logout
+              </button>
+            )}
           </div>
-        </div>
+        </nav>
       )}
-    </nav>
+    </header>
   );
 }
-
-export default Navbar;

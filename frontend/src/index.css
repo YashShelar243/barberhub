@@ -1,15 +1,44 @@
 @import "tailwindcss";
 
+/* Enable class-based dark mode in Tailwind CSS 4 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light;
+
+  --app-bg: #f8fafc;
+  --surface: #ffffff;
+  --surface-muted: #f1f5f9;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --border-color: #e2e8f0;
+  --input-bg: #ffffff;
+}
+
+html.dark {
+  color-scheme: dark;
+
+  --app-bg: #0b1120;
+  --surface: #111827;
+  --surface-muted: #1e293b;
+  --text-primary: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --border-color: #334155;
+  --input-bg: #1e293b;
+}
+
 * {
   box-sizing: border-box;
 }
 
 html {
   scroll-behavior: smooth;
+  min-height: 100%;
 }
 
 body {
   margin: 0;
+  min-height: 100vh;
   font-family:
     Inter,
     system-ui,
@@ -17,8 +46,11 @@ body {
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
-  background: #f8fafc;
-  color: #0f172a;
+  background: var(--app-bg);
+  color: var(--text-primary);
+  transition:
+    background-color 180ms ease,
+    color 180ms ease;
 }
 
 button,
@@ -30,4 +62,87 @@ select {
 
 button {
   cursor: pointer;
+}
+
+input,
+textarea,
+select {
+  background-color: var(--input-bg);
+  color: var(--text-primary);
+}
+
+::placeholder {
+  color: #94a3b8;
+}
+
+.dark ::placeholder {
+  color: #94a3b8;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+.dark .bg-white {
+  background-color: var(--surface);
+}
+
+.dark .bg-gray-50 {
+  background-color: var(--app-bg);
+}
+
+.dark .bg-gray-100 {
+  background-color: var(--surface-muted);
+}
+
+.dark .text-gray-900 {
+  color: var(--text-primary);
+}
+
+.dark .text-gray-800 {
+  color: #e2e8f0;
+}
+
+.dark .text-gray-700 {
+  color: #e2e8f0;
+}
+
+.dark .text-gray-600,
+.dark .text-gray-500 {
+  color: var(--text-secondary);
+}
+
+.dark .border-gray-100,
+.dark .border-gray-200,
+.dark .border-gray-300 {
+  border-color: var(--border-color);
+}
+
+.dark .hover\:bg-gray-50:hover {
+  background-color: var(--surface-muted);
+}
+
+.dark .hover\:bg-gray-100:hover {
+  background-color: #334155;
+}
+
+.dark input,
+.dark textarea,
+.dark select {
+  border-color: var(--border-color);
+}
+
+.dark input:focus,
+.dark textarea:focus,
+.dark select:focus {
+  border-color: #60a5fa;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }

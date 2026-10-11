@@ -1,7 +1,9 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AuthProvider } from "./context/AuthContext";
+import { ThemeProvider } from "./context/ThemeContext";
 
+import Navbar from "./components/Navbar";
 import Login from "./pages/auth/Login";
 import Register from "./pages/auth/Register";
 
@@ -18,39 +20,43 @@ import CustomerAppointments from "./pages/customer/CustomerAppointments";
 
 function AppRoutes() {
   return (
-    <Routes>
-      {/* Default route */}
-      <Route path="/" element={<Navigate to="/login" replace />} />
+    <>
+      <Navbar />
 
-      {/* Public routes */}
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
+      <Routes>
+        {/* Default route */}
+        <Route path="/" element={<Navigate to="/login" replace />} />
 
-      {/* Customer routes */}
-      <Route element={<ProtectedRoute allowedRoles={["customer"]} />}>
-        <Route path="/customer/dashboard" element={<CustomerDashboard />} />
-        <Route path="/customer/shops" element={<CustomerShops />} />
-        <Route
-          path="/customer/appointments"
-          element={<CustomerAppointments />}
-        />
-      </Route>
+        {/* Public routes */}
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
 
-      {/* Owner routes */}
-      <Route element={<ProtectedRoute allowedRoles={["owner"]} />}>
-        <Route path="/owner/dashboard" element={<OwnerDashboard />} />
-        <Route path="/owner/appointments" element={<OwnerAppointments />} />
-        <Route path="/owner/services" element={<OwnerServices />} />
-      </Route>
+        {/* Customer routes */}
+        <Route element={<ProtectedRoute allowedRoles={["customer"]} />}>
+          <Route path="/customer/dashboard" element={<CustomerDashboard />} />
+          <Route path="/customer/shops" element={<CustomerShops />} />
+          <Route
+            path="/customer/appointments"
+            element={<CustomerAppointments />}
+          />
+        </Route>
 
-      {/* Admin routes */}
-      <Route element={<ProtectedRoute allowedRoles={["admin"]} />}>
-        <Route path="/admin/dashboard" element={<AdminDashboard />} />
-      </Route>
+        {/* Owner routes */}
+        <Route element={<ProtectedRoute allowedRoles={["owner"]} />}>
+          <Route path="/owner/dashboard" element={<OwnerDashboard />} />
+          <Route path="/owner/appointments" element={<OwnerAppointments />} />
+          <Route path="/owner/services" element={<OwnerServices />} />
+        </Route>
 
-      {/* Unknown routes */}
-      <Route path="*" element={<Navigate to="/login" replace />} />
-    </Routes>
+        {/* Admin routes */}
+        <Route element={<ProtectedRoute allowedRoles={["admin"]} />}>
+          <Route path="/admin/dashboard" element={<AdminDashboard />} />
+        </Route>
+
+        {/* Unknown routes */}
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    </>
   );
 }
 
@@ -58,7 +64,9 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppRoutes />
+        <ThemeProvider>
+          <AppRoutes />
+        </ThemeProvider>
       </AuthProvider>
     </BrowserRouter>
   );
