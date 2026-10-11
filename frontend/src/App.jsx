@@ -9,6 +9,8 @@ import ProtectedRoute from "./components/ProtectedRoute";
 
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import OwnerDashboard from "./pages/owner/OwnerDashboard";
+import OwnerAppointments from "./pages/owner/OwnerAppointments";
+import OwnerServices from "./pages/owner/OwnerServices";
 
 import CustomerDashboard from "./pages/customer/CustomerDashboard";
 import CustomerShops from "./pages/customer/CustomerShops";
@@ -37,6 +39,8 @@ function AppRoutes() {
       {/* Owner routes */}
       <Route element={<ProtectedRoute allowedRoles={["owner"]} />}>
         <Route path="/owner/dashboard" element={<OwnerDashboard />} />
+        <Route path="/owner/appointments" element={<OwnerAppointments />} />
+        <Route path="/owner/services" element={<OwnerServices />} />
       </Route>
 
       {/* Admin routes */}

@@ -7,6 +7,8 @@ const pool = require("./config/database");
 const authRoutes = require("./routes/authRoutes");
 const shopRoutes = require("./routes/shopRoutes");
 const adminRoutes = require("./routes/adminRoutes");
+const appointmentRoutes = require("./routes/appointmentRoutes");
+const serviceRoutes = require("./routes/serviceRoutes");
 
 const app = express();
 
@@ -18,6 +20,8 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/shops", shopRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/appointments", appointmentRoutes);
+app.use("/api/services", serviceRoutes);
 
 // Root endpoint
 app.get("/", (req, res) => {
