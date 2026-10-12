@@ -13,8 +13,7 @@ const statusStyles = {
 function formatDate(date) {
   if (!date) return "Date unavailable";
 
-  const value = String(date).slice(0, 10);
-  const [year, month, day] = value.split("-").map(Number);
+  const [year, month, day] = String(date).slice(0, 10).split("-").map(Number);
 
   return new Date(year, month - 1, day).toLocaleDateString("en-IN", {
     day: "numeric",
@@ -36,13 +35,36 @@ function formatTime(time) {
   });
 }
 
+function canCancelAppointment(appointment) {
+  const status = String(appointment.status || "").toLowerCase();
+
+  if (!["pending", "confirmed"].includes(status)) {
+    return false;
+  }
+
+  // Compare using the appointment's local date and time.
+  const date = String(appointment.appointment_date || "").slice(0, 10);
+  const time = String(appointment.appointment_time || "").slice(0, 5);
+
+  if (!date || !time) return false;
+
+  const appointmentDateTime = new Date(`${date}T${time}:00`);
+
+  return (
+    !Number.isNaN(appointmentDateTime.getTime()) &&
+    appointmentDateTime.getTime() > Date.now()
+  );
+}
+
 export default function CustomerAppointments() {
   const navigate = useNavigate();
 
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [cancellingId, setCancellingId] = useState(null);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
   const loadAppointments = useCallback(async (isRefresh = false) => {
     if (isRefresh) {
@@ -52,6 +74,7 @@ export default function CustomerAppointments() {
     }
 
     setError("");
+    setMessage("");
 
     try {
       const response = await api.get("/appointments/my");
@@ -71,6 +94,51 @@ export default function CustomerAppointments() {
     loadAppointments();
   }, [loadAppointments]);
 
+  async function cancelAppointment(appointment) {
+    if (!canCancelAppointment(appointment)) {
+      setError("This appointment is no longer eligible for cancellation.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Are you sure you want to cancel your appointment at ${
+        appointment.shop_name || "this barber shop"
+      }?`,
+    );
+
+    if (!confirmed) return;
+
+    setCancellingId(appointment.id);
+    setError("");
+    setMessage("");
+
+    try {
+      // This endpoint must be implemented in the backend.
+      const response = await api.patch(
+        `/appointments/${appointment.id}/cancel`,
+      );
+
+      setAppointments((current) =>
+        current.map((item) =>
+          item.id === appointment.id
+            ? { ...item, ...response.data.appointment }
+            : item,
+        ),
+      );
+
+      setMessage(
+        response.data.message || "Appointment cancelled successfully.",
+      );
+    } catch (err) {
+      setError(
+        err.response?.data?.message ||
+          "Unable to cancel appointment. Please try again.",
+      );
+    } finally {
+      setCancellingId(null);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-gray-50 px-4 py-6 sm:p-10">
       <div className="mx-auto max-w-5xl">
@@ -87,7 +155,7 @@ export default function CustomerAppointments() {
               My Appointments
             </h1>
             <p className="mt-2 text-gray-600">
-              Track your barber shop bookings and their status.
+              Track and manage your barber shop bookings.
             </p>
           </div>
 
@@ -113,6 +181,15 @@ export default function CustomerAppointments() {
               Try again
             </button>
           </div>
+        )}
+
+        {message && (
+          <p
+            role="status"
+            className="mt-6 rounded-lg border border-green-200 bg-green-50 p-4 text-green-800"
+          >
+            {message}
+          </p>
         )}
 
         {loading ? (
@@ -141,6 +218,9 @@ export default function CustomerAppointments() {
               const status = String(
                 appointment.status || "pending",
               ).toLowerCase();
+
+              const isCancelling = cancellingId === appointment.id;
+              const cancellationAllowed = canCancelAppointment(appointment);
 
               return (
                 <article
@@ -211,6 +291,18 @@ export default function CustomerAppointments() {
                     <div className="mt-4 border-t border-gray-100 pt-4">
                       <p className="text-sm text-gray-500">Your notes</p>
                       <p className="mt-1 text-gray-800">{appointment.notes}</p>
+                    </div>
+                  )}
+
+                  {cancellationAllowed && (
+                    <div className="mt-5 flex justify-end border-t border-gray-100 pt-5">
+                      <button
+                        onClick={() => cancelAppointment(appointment)}
+                        disabled={isCancelling}
+                        className="rounded-lg border border-red-200 px-5 py-3 font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isCancelling ? "Cancelling..." : "Cancel Appointment"}
+                      </button>
                     </div>
                   )}
                 </article>

@@ -1,8 +1,35 @@
 const pool = require("../config/database");
 
-// Customer: create an appointment
+// Create a notification without breaking the appointment operation
+// if notification insertion fails.
+const createNotification = async ({
+  userId,
+  appointmentId,
+  title,
+  message,
+}) => {
+  try {
+    await pool.query(
+      `INSERT INTO notifications (
+         user_id,
+         appointment_id,
+         title,
+         message,
+         type
+       )
+       VALUES ($1, $2, $3, $4, 'appointment')`,
+      [userId, appointmentId, title, message],
+    );
+  } catch (error) {
+    console.error("Create notification error:", error.message);
+  }
+};
 
+// Customer: create an appointment with overlap protection
 const createAppointment = async (req, res) => {
+  let client;
+  let transactionStarted = false;
+
   try {
     const { shop_id, appointment_date, appointment_time, service_id, notes } =
       req.body;
@@ -22,7 +49,6 @@ const createAppointment = async (req, res) => {
       });
     }
 
-    // Validate date format and calendar date.
     if (!/^\d{4}-\d{2}-\d{2}$/.test(appointment_date)) {
       return res.status(400).json({
         success: false,
@@ -53,7 +79,6 @@ const createAppointment = async (req, res) => {
       });
     }
 
-    // Validate time.
     if (!/^\d{2}:\d{2}$/.test(appointment_time)) {
       return res.status(400).json({
         success: false,
@@ -77,40 +102,31 @@ const createAppointment = async (req, res) => {
       });
     }
 
-    // Verify that the shop is active.
-    const shopResult = await pool.query(
+    client = await pool.connect();
+
+    await client.query("BEGIN");
+    transactionStarted = true;
+
+    // Serialize bookings for the same shop.
+    const shopResult = await client.query(
       `SELECT id
        FROM barber_shops
-       WHERE id = $1 AND is_active = TRUE`,
+       WHERE id = $1 AND is_active = TRUE
+       FOR UPDATE`,
       [Number(shop_id)],
     );
 
     if (shopResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
       return res.status(404).json({
         success: false,
         message: "Active barber shop not found.",
       });
     }
 
-    // Verify that the service belongs to this shop and is available.
-    const serviceResult = await pool.query(
-      `SELECT id, name, price
-       FROM shop_services
-       WHERE id = $1
-         AND shop_id = $2
-         AND is_available = TRUE`,
-      [Number(service_id), Number(shop_id)],
-    );
-
-    if (serviceResult.rowCount === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Selected service is unavailable for this shop.",
-      });
-    }
-
-    // Verify the customer account.
-    const customerResult = await pool.query(
+    const customerResult = await client.query(
       `SELECT id
        FROM users
        WHERE id = $1
@@ -120,17 +136,93 @@ const createAppointment = async (req, res) => {
     );
 
     if (customerResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
       return res.status(403).json({
         success: false,
         message: "An active customer account is required to book.",
       });
     }
 
-    // Use the service name and price from the database,
-    // never values supplied by the frontend.
-    const service = serviceResult.rows[0];
+    const serviceResult = await client.query(
+      `SELECT id, name, price, duration_minutes
+       FROM shop_services
+       WHERE id = $1
+         AND shop_id = $2
+         AND is_available = TRUE`,
+      [Number(service_id), Number(shop_id)],
+    );
 
-    const result = await pool.query(
+    if (serviceResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
+      return res.status(400).json({
+        success: false,
+        message: "Selected service is unavailable for this shop.",
+      });
+    }
+
+    const service = serviceResult.rows[0];
+    const duration = Number(service.duration_minutes);
+
+    if (!Number.isInteger(duration) || duration <= 0) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
+      return res.status(400).json({
+        success: false,
+        message: "The selected service has an invalid duration.",
+      });
+    }
+
+    const startMinutes = hours * 60 + minutes;
+
+    if (startMinutes + duration > 24 * 60) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
+      return res.status(400).json({
+        success: false,
+        message: "Appointment duration cannot extend past midnight.",
+      });
+    }
+
+    // Pending and confirmed appointments reserve the slot.
+    // Rejected and cancelled appointments do not.
+    const conflictResult = await client.query(
+      `SELECT a.id
+       FROM appointments a
+       JOIN shop_services existing_service
+         ON existing_service.id = a.service_id
+       WHERE a.shop_id = $1
+         AND a.appointment_date = $2
+         AND a.status IN ('pending', 'confirmed')
+         AND (
+           a.appointment_time,
+           a.appointment_time
+             + (existing_service.duration_minutes * INTERVAL '1 minute')
+         ) OVERLAPS (
+           $3::time,
+           $3::time + ($4::integer * INTERVAL '1 minute')
+         )
+       LIMIT 1`,
+      [Number(shop_id), appointment_date, appointment_time, duration],
+    );
+
+    if (conflictResult.rowCount > 0) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
+      return res.status(409).json({
+        success: false,
+        message:
+          "This time slot overlaps another pending or confirmed appointment. Please choose a different time.",
+      });
+    }
+
+    const result = await client.query(
       `INSERT INTO appointments (
          shop_id,
          customer_id,
@@ -155,18 +247,29 @@ const createAppointment = async (req, res) => {
       ],
     );
 
+    await client.query("COMMIT");
+    transactionStarted = false;
+
     return res.status(201).json({
       success: true,
       message: "Appointment requested successfully.",
       appointment: result.rows[0],
     });
   } catch (error) {
+    if (client && transactionStarted) {
+      await client.query("ROLLBACK").catch(() => {});
+    }
+
     console.error("Create appointment error:", error.message);
 
     return res.status(500).json({
       success: false,
       message: "Unable to create appointment.",
     });
+  } finally {
+    if (client) {
+      client.release();
+    }
   }
 };
 
@@ -211,7 +314,7 @@ const getOwnerAppointments = async (req, res) => {
   }
 };
 
-// Owner: confirm or reject a pending appointment
+// Owner: confirm, reject, or complete an appointment
 const updateAppointmentStatus = async (req, res) => {
   try {
     const { id } = req.params;
@@ -224,10 +327,19 @@ const updateAppointmentStatus = async (req, res) => {
       });
     }
 
-    if (!["confirmed", "rejected"].includes(status)) {
+    const allowedTransitions = {
+      pending: ["confirmed", "rejected"],
+      confirmed: ["completed"],
+    };
+
+    if (
+      !Object.values(allowedTransitions).some((statuses) =>
+        statuses.includes(status),
+      )
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Status must be confirmed or rejected.",
+        message: "Invalid appointment status transition.",
       });
     }
 
@@ -238,7 +350,10 @@ const updateAppointmentStatus = async (req, res) => {
        WHERE a.id = $2
          AND a.shop_id = bs.id
          AND bs.owner_id = $3
-         AND a.status = 'pending'
+         AND (
+           (a.status = 'pending' AND $1 IN ('confirmed', 'rejected'))
+           OR (a.status = 'confirmed' AND $1 = 'completed')
+         )
        RETURNING
          a.id,
          a.shop_id,
@@ -253,14 +368,36 @@ const updateAppointmentStatus = async (req, res) => {
     if (result.rowCount === 0) {
       return res.status(404).json({
         success: false,
-        message: "Pending appointment not found for your shop.",
+        message:
+          "Appointment not found, not owned by your shop, or its status no longer allows this action.",
+      });
+    }
+
+    const appointment = result.rows[0];
+
+    // Notify the customer about confirmation or rejection.
+    if (status === "confirmed" || status === "rejected") {
+      const dateText = String(appointment.appointment_date).slice(0, 10);
+      const timeText = String(appointment.appointment_time).slice(0, 5);
+
+      await createNotification({
+        userId: appointment.customer_id,
+        appointmentId: appointment.id,
+        title:
+          status === "confirmed"
+            ? "Appointment confirmed"
+            : "Appointment rejected",
+        message:
+          status === "confirmed"
+            ? `Your ${appointment.service_name} appointment on ${dateText} at ${timeText} has been confirmed.`
+            : `Your ${appointment.service_name} appointment on ${dateText} at ${timeText} has been rejected. Please book another slot.`,
       });
     }
 
     return res.status(200).json({
       success: true,
       message: `Appointment ${status} successfully.`,
-      appointment: result.rows[0],
+      appointment,
     });
   } catch (error) {
     console.error("Update appointment status error:", error.message);
@@ -272,6 +409,7 @@ const updateAppointmentStatus = async (req, res) => {
   }
 };
 
+// Customer: view their appointments
 const getCustomerAppointments = async (req, res) => {
   try {
     const result = await pool.query(
@@ -309,9 +447,86 @@ const getCustomerAppointments = async (req, res) => {
   }
 };
 
+// Customer: cancel their own upcoming appointment
+const cancelCustomerAppointment = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!/^[1-9]\d*$/.test(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid appointment ID.",
+      });
+    }
+
+    const result = await pool.query(
+      `UPDATE appointments AS a
+       SET status = 'cancelled'
+       WHERE a.id = $1
+         AND a.customer_id = $2
+         AND a.status IN ('pending', 'confirmed')
+         AND (a.appointment_date + a.appointment_time) >
+             (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')
+       RETURNING
+         a.id,
+         a.shop_id,
+         a.customer_id,
+         a.appointment_date,
+         a.appointment_time,
+         a.service_name,
+         a.status`,
+      [Number(id), req.user.id],
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "This appointment cannot be cancelled. It may not belong to you, may already be processed, or may have already started.",
+      });
+    }
+
+    const appointment = result.rows[0];
+
+    // Notify the shop owner that the customer cancelled.
+    const shopResult = await pool.query(
+      `SELECT owner_id
+       FROM barber_shops
+       WHERE id = $1`,
+      [appointment.shop_id],
+    );
+
+    if (shopResult.rowCount > 0) {
+      const dateText = String(appointment.appointment_date).slice(0, 10);
+      const timeText = String(appointment.appointment_time).slice(0, 5);
+
+      await createNotification({
+        userId: shopResult.rows[0].owner_id,
+        appointmentId: appointment.id,
+        title: "Appointment cancelled",
+        message: `The customer cancelled the ${appointment.service_name} appointment scheduled for ${dateText} at ${timeText}.`,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Appointment cancelled successfully.",
+      appointment,
+    });
+  } catch (error) {
+    console.error("Cancel customer appointment error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to cancel appointment. Please try again.",
+    });
+  }
+};
+
 module.exports = {
   createAppointment,
   getOwnerAppointments,
   updateAppointmentStatus,
   getCustomerAppointments,
+  cancelCustomerAppointment,
 };

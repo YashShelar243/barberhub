@@ -5,27 +5,30 @@ const {
   getOwnerAppointments,
   updateAppointmentStatus,
   getCustomerAppointments,
+  cancelCustomerAppointment,
 } = require("../controllers/appointmentController");
 
 const { protect, authorize } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
-// Customer: book an appointment
+// Customer routes
 router.post("/", protect, authorize("customer"), createAppointment);
+router.get("/my", protect, authorize("customer"), getCustomerAppointments);
+router.patch(
+  "/:id/cancel",
+  protect,
+  authorize("customer"),
+  cancelCustomerAppointment,
+);
 
-// Owner: view appointments for their shop
+// Owner routes
 router.get("/owner", protect, authorize("owner"), getOwnerAppointments);
-
-// Owner: confirm or reject an appointment
 router.patch(
   "/:id/status",
   protect,
   authorize("owner"),
   updateAppointmentStatus,
 );
-
-// Customer: view their appointments
-router.get("/my", protect, authorize("customer"), getCustomerAppointments);
 
 module.exports = router;

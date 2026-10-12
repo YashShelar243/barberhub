@@ -75,7 +75,18 @@ export default function OwnerAppointments() {
   }, [fetchAppointments]);
 
   async function updateStatus(id, status) {
-    const action = status === "confirmed" ? "confirm" : "reject";
+    const actions = {
+      confirmed: "confirm",
+      rejected: "reject",
+      completed: "mark as completed",
+    };
+
+    const action = actions[status];
+
+    if (!action) {
+      setError("Invalid appointment action.");
+      return;
+    }
 
     if (
       !window.confirm(`Are you sure you want to ${action} this appointment?`)
@@ -118,6 +129,10 @@ export default function OwnerAppointments() {
 
   const pendingCount = appointments.filter(
     (appointment) => appointment.status === "pending",
+  ).length;
+
+  const confirmedCount = appointments.filter(
+    (appointment) => appointment.status === "confirmed",
   ).length;
 
   return (
@@ -167,7 +182,7 @@ export default function OwnerAppointments() {
           <div className="rounded-xl border border-green-200 bg-white p-5">
             <p className="text-sm text-gray-500">Confirmed appointments</p>
             <p className="mt-2 text-3xl font-bold text-green-700">
-              {appointments.filter((a) => a.status === "confirmed").length}
+              {confirmedCount}
             </p>
           </div>
         </div>
@@ -318,25 +333,43 @@ export default function OwnerAppointments() {
                     </div>
                   )}
 
-                  {status === "pending" && (
+                  {(status === "pending" || status === "confirmed") && (
                     <div className="mt-5 flex flex-col gap-3 border-t border-gray-100 pt-5 sm:flex-row sm:justify-end">
-                      <button
-                        onClick={() => updateStatus(appointment.id, "rejected")}
-                        disabled={isUpdating}
-                        className="rounded-lg border border-red-200 px-5 py-3 font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
-                      >
-                        {isUpdating ? "Updating..." : "Reject"}
-                      </button>
+                      {status === "pending" && (
+                        <>
+                          <button
+                            onClick={() =>
+                              updateStatus(appointment.id, "rejected")
+                            }
+                            disabled={isUpdating}
+                            className="rounded-lg border border-red-200 px-5 py-3 font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
+                          >
+                            {isUpdating ? "Updating..." : "Reject"}
+                          </button>
 
-                      <button
-                        onClick={() =>
-                          updateStatus(appointment.id, "confirmed")
-                        }
-                        disabled={isUpdating}
-                        className="rounded-lg bg-green-600 px-5 py-3 font-semibold text-white hover:bg-green-700 disabled:opacity-60"
-                      >
-                        {isUpdating ? "Updating..." : "Confirm Appointment"}
-                      </button>
+                          <button
+                            onClick={() =>
+                              updateStatus(appointment.id, "confirmed")
+                            }
+                            disabled={isUpdating}
+                            className="rounded-lg bg-green-600 px-5 py-3 font-semibold text-white hover:bg-green-700 disabled:opacity-60"
+                          >
+                            {isUpdating ? "Updating..." : "Confirm Appointment"}
+                          </button>
+                        </>
+                      )}
+
+                      {status === "confirmed" && (
+                        <button
+                          onClick={() =>
+                            updateStatus(appointment.id, "completed")
+                          }
+                          disabled={isUpdating}
+                          className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                        >
+                          {isUpdating ? "Updating..." : "Mark Completed"}
+                        </button>
+                      )}
                     </div>
                   )}
                 </article>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../../context/AuthContext";
 import api from "../../services/api";
+import OwnerReports from "./OwnerReports";
 
 const EMPTY_FORM = {
   name: "",
@@ -502,6 +503,7 @@ export default function OwnerDashboard() {
             </div>
           </form>
         </section>
+        {shop && <OwnerReports />}
       </div>
     </main>
   );
