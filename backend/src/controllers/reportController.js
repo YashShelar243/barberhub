@@ -1,12 +1,11 @@
 const pool = require("../config/database");
 
-// Owner: get daily and monthly business reports
+// Owner: get daily and monthly business reports.
 const getOwnerReports = async (req, res) => {
   try {
-    // Only retrieve the shop belonging to the logged-in owner.
     const shopResult = await pool.query(
       `SELECT id, name
-       FROM barber_shops
+       FROM public.barber_shops
        WHERE owner_id = $1
        LIMIT 1`,
       [req.user.id],
@@ -21,7 +20,7 @@ const getOwnerReports = async (req, res) => {
 
     const shopId = shopResult.rows[0].id;
 
-    // Appointment counts by status.
+    // Keep the appointment statistics from the existing report.
     const statsResult = await pool.query(
       `SELECT
          COUNT(*)::int AS total_appointments,
@@ -30,66 +29,109 @@ const getOwnerReports = async (req, res) => {
          COUNT(*) FILTER (WHERE status = 'completed')::int AS completed,
          COUNT(*) FILTER (WHERE status = 'cancelled')::int AS cancelled,
          COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected
-       FROM appointments
+       FROM public.appointments
        WHERE shop_id = $1`,
       [shopId],
     );
 
-    // Revenue estimates from completed appointments.
-    // These are not verified payment collections.
+    // A common revenue source for completed appointments and walk-ins.
+    // Appointment-linked queue rows are excluded to prevent double-counting.
+    const revenueCte = `
+      WITH completed_revenue AS (
+        SELECT
+          a.appointment_date AS service_date,
+          a.service_name,
+          a.service_price::numeric AS amount
+        FROM public.appointments a
+        WHERE a.shop_id = $1
+          AND a.status = 'completed'
+
+        UNION ALL
+
+        SELECT
+          (q.completed_at AT TIME ZONE 'Asia/Kolkata')::date
+            AS service_date,
+          ss.name AS service_name,
+          q.service_price::numeric AS amount
+        FROM public.shop_queue q
+        JOIN public.shop_services ss ON ss.id = q.service_id
+        WHERE q.shop_id = $1
+          AND q.status = 'completed'
+          AND q.appointment_id IS NULL
+          AND q.completed_at IS NOT NULL
+      )
+    `;
+
     const revenueResult = await pool.query(
-      `SELECT
+      `${revenueCte}
+       SELECT
          COALESCE(
-           SUM(service_price) FILTER (
-             WHERE status = 'completed'
-               AND appointment_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+           SUM(amount) FILTER (
+             WHERE service_date =
+               (NOW() AT TIME ZONE 'Asia/Kolkata')::date
            ), 0
          ) AS today_revenue,
          COALESCE(
-           SUM(service_price) FILTER (
-             WHERE status = 'completed'
-               AND appointment_date >=
-                   date_trunc('month', NOW() AT TIME ZONE 'Asia/Kolkata')::date
-               AND appointment_date <
-                   (date_trunc('month', NOW() AT TIME ZONE 'Asia/Kolkata')
-                    + INTERVAL '1 month')::date
+           SUM(amount) FILTER (
+             WHERE service_date >=
+               date_trunc(
+                 'month',
+                 NOW() AT TIME ZONE 'Asia/Kolkata'
+               )::date
+               AND service_date <
+               (
+                 date_trunc(
+                   'month',
+                   NOW() AT TIME ZONE 'Asia/Kolkata'
+                 ) + INTERVAL '1 month'
+               )::date
            ), 0
          ) AS monthly_revenue
-       FROM appointments
-       WHERE shop_id = $1`,
+       FROM completed_revenue`,
       [shopId],
     );
 
-    // Daily revenue for the last seven calendar days, including today.
     const dailyResult = await pool.query(
-      `SELECT
-         appointment_date::text AS date,
-         COALESCE(SUM(service_price), 0) AS revenue,
+      `${revenueCte}
+       SELECT
+         service_date::text AS date,
+         COALESCE(SUM(amount), 0) AS revenue,
          COUNT(*)::int AS completed_appointments
-       FROM appointments
-       WHERE shop_id = $1
-         AND status = 'completed'
-         AND appointment_date >=
-             ((NOW() AT TIME ZONE 'Asia/Kolkata')::date - 6)
-         AND appointment_date <=
-             (NOW() AT TIME ZONE 'Asia/Kolkata')::date
-       GROUP BY appointment_date
-       ORDER BY appointment_date ASC`,
+       FROM completed_revenue
+       WHERE service_date >=
+         ((NOW() AT TIME ZONE 'Asia/Kolkata')::date - 6)
+         AND service_date <=
+         (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+       GROUP BY service_date
+       ORDER BY service_date ASC`,
       [shopId],
     );
 
-    // Most frequently completed services.
     const servicesResult = await pool.query(
-      `SELECT
+      `${revenueCte}
+       SELECT
          service_name,
          COUNT(*)::int AS bookings,
-         COALESCE(SUM(service_price), 0) AS revenue
-       FROM appointments
-       WHERE shop_id = $1
-         AND status = 'completed'
+         COALESCE(SUM(amount), 0) AS revenue
+       FROM completed_revenue
        GROUP BY service_name
        ORDER BY bookings DESC, revenue DESC
        LIMIT 5`,
+      [shopId],
+    );
+
+    // Report walk-ins separately from online appointments.
+    const walkInResult = await pool.query(
+      `SELECT
+         COUNT(*) FILTER (
+           WHERE status IN ('waiting', 'in_service')
+         )::int AS active_walk_ins,
+         COUNT(*) FILTER (
+           WHERE status = 'completed'
+         )::int AS completed_walk_ins
+       FROM public.shop_queue
+       WHERE shop_id = $1
+         AND appointment_id IS NULL`,
       [shopId],
     );
 
@@ -97,6 +139,7 @@ const getOwnerReports = async (req, res) => {
       success: true,
       shop: shopResult.rows[0],
       appointments: statsResult.rows[0],
+      walkIns: walkInResult.rows[0],
       revenue: revenueResult.rows[0],
       dailyRevenue: dailyResult.rows,
       popularServices: servicesResult.rows,
