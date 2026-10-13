@@ -1,11 +1,10 @@
-
 const pool = require("../config/database");
 
-// Get the authenticated owner's shop
+// Get the authenticated owner's shop.
 async function getOwnerShop(ownerId) {
   const result = await pool.query(
     `SELECT id
-     FROM barber_shops
+     FROM public.barber_shops
      WHERE owner_id = $1
      LIMIT 1`,
     [ownerId],
@@ -14,7 +13,36 @@ async function getOwnerShop(ownerId) {
   return result.rows[0] || null;
 }
 
-// Owner: view the queue for their shop
+// Calculate remaining time for the current service and full duration
+// for each waiting customer.
+function remainingMinutes(entry, now = Date.now()) {
+  const duration = Math.max(0, Number(entry.duration_minutes) || 0);
+
+  if (entry.status !== "in_service" || !entry.started_at) {
+    return duration;
+  }
+
+  const started = new Date(entry.started_at).getTime();
+
+  if (!Number.isFinite(started)) {
+    return duration;
+  }
+
+  const elapsed = Math.max(0, Math.floor((now - started) / 60000));
+
+  return Math.max(0, duration - elapsed);
+}
+
+function estimateWait(queue) {
+  const now = Date.now();
+
+  return queue.reduce(
+    (total, entry) => total + remainingMinutes(entry, now),
+    0,
+  );
+}
+
+// Owner: view today's active queue.
 const getMyQueue = async (req, res) => {
   try {
     const shop = await getOwnerShop(req.user.id);
@@ -34,16 +62,25 @@ const getMyQueue = async (req, res) => {
          q.customer_id,
          q.customer_name,
          q.customer_phone,
+         q.appointment_id,
+         q.queue_date,
+         q.service_price,
          q.status,
          q.created_at,
          q.started_at,
          q.completed_at,
          ss.name AS service_name,
          ss.duration_minutes,
-         ss.price
-       FROM shop_queue q
-       JOIN shop_services ss ON ss.id = q.service_id
+         COALESCE(q.service_price, ss.price) AS price,
+         a.appointment_time
+       FROM public.shop_queue q
+       JOIN public.shop_services ss
+         ON ss.id = q.service_id
+       LEFT JOIN public.appointments a
+         ON a.id = q.appointment_id
        WHERE q.shop_id = $1
+         AND q.queue_date =
+             (NOW() AT TIME ZONE 'Asia/Kolkata')::date
          AND q.status IN ('waiting', 'in_service')
        ORDER BY
          CASE WHEN q.status = 'in_service' THEN 0 ELSE 1 END,
@@ -52,21 +89,11 @@ const getMyQueue = async (req, res) => {
       [shop.id],
     );
 
-    const waiting = result.rows.filter(
-      (entry) => entry.status === "waiting",
-    );
+    const queue = result.rows;
 
-    const inService = result.rows.filter(
-      (entry) => entry.status === "in_service",
-    );
+    const waiting = queue.filter((entry) => entry.status === "waiting");
 
-    const estimatedWaitMinutes = waiting.reduce(
-      (total, entry) => total + Number(entry.duration_minutes),
-      inService.reduce(
-        (total, entry) => total + Number(entry.duration_minutes),
-        0,
-      ),
-    );
+    const inService = queue.filter((entry) => entry.status === "in_service");
 
     return res.status(200).json({
       success: true,
@@ -74,15 +101,11 @@ const getMyQueue = async (req, res) => {
       crowd: {
         waiting: waiting.length,
         in_service: inService.length,
-        estimated_wait_minutes: estimatedWaitMinutes,
+        estimated_wait_minutes: estimateWait(queue),
         level:
-          waiting.length < 3
-            ? "low"
-            : waiting.length < 7
-              ? "moderate"
-              : "busy",
+          waiting.length < 3 ? "low" : waiting.length < 7 ? "moderate" : "busy",
       },
-      queue: result.rows,
+      queue,
     });
   } catch (error) {
     console.error("Get owner queue error:", error.message);
@@ -94,15 +117,12 @@ const getMyQueue = async (req, res) => {
   }
 };
 
-// Owner: add a walk-in customer
+// Owner: add a walk-in customer and save the service price.
 const addWalkIn = async (req, res) => {
   try {
     const { service_id, customer_name, customer_phone } = req.body;
 
-    if (
-      !Number.isInteger(Number(service_id)) ||
-      Number(service_id) <= 0
-    ) {
+    if (!Number.isInteger(Number(service_id)) || Number(service_id) <= 0) {
       return res.status(400).json({
         success: false,
         message: "Select a valid service.",
@@ -116,14 +136,14 @@ const addWalkIn = async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        message: "Customer name is required and must be at most 100 characters.",
+        message:
+          "Customer name is required and must be at most 100 characters.",
       });
     }
 
     if (
       customer_phone != null &&
-      (typeof customer_phone !== "string" ||
-        customer_phone.trim().length > 15)
+      (typeof customer_phone !== "string" || customer_phone.trim().length > 15)
     ) {
       return res.status(400).json({
         success: false,
@@ -141,8 +161,8 @@ const addWalkIn = async (req, res) => {
     }
 
     const serviceResult = await pool.query(
-      `SELECT id
-       FROM shop_services
+      `SELECT id, price
+       FROM public.shop_services
        WHERE id = $1
          AND shop_id = $2
          AND is_available = TRUE`,
@@ -156,20 +176,34 @@ const addWalkIn = async (req, res) => {
       });
     }
 
+    const service = serviceResult.rows[0];
+
     const result = await pool.query(
-      `INSERT INTO shop_queue (
+      `INSERT INTO public.shop_queue (
          shop_id,
          service_id,
          customer_name,
-         customer_phone
+         customer_phone,
+         queue_date,
+         service_price,
+         status
        )
-       VALUES ($1, $2, $3, $4)
+       VALUES (
+         $1,
+         $2,
+         $3,
+         $4,
+         (NOW() AT TIME ZONE 'Asia/Kolkata')::date,
+         $5,
+         'waiting'
+       )
        RETURNING *`,
       [
         shop.id,
         Number(service_id),
         customer_name.trim(),
         customer_phone?.trim() || null,
+        service.price,
       ],
     );
 
@@ -188,18 +222,21 @@ const addWalkIn = async (req, res) => {
   }
 };
 
-// Owner: start serving a waiting customer
+// Owner: start the next waiting customer.
+// Only one customer can be in service at a time.
 const startService = async (req, res) => {
+  const { id } = req.params;
+
+  if (!/^[1-9]\d*$/.test(id)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid queue entry ID.",
+    });
+  }
+
+  let client;
+
   try {
-    const { id } = req.params;
-
-    if (!/^[1-9]\d*$/.test(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid queue entry ID.",
-      });
-    }
-
     const shop = await getOwnerShop(req.user.id);
 
     if (!shop) {
@@ -209,80 +246,109 @@ const startService = async (req, res) => {
       });
     }
 
-    const client = await pool.connect();
+    client = await pool.connect();
 
-    try {
-      await client.query("BEGIN");
+    await client.query("BEGIN");
 
-      // Lock the shop row so simultaneous requests cannot start
-      // two services for the same shop.
-      await client.query(
-        "SELECT id FROM barber_shops WHERE id = $1 FOR UPDATE",
-        [shop.id],
-      );
+    await client.query(
+      `SELECT id
+       FROM public.barber_shops
+       WHERE id = $1
+       FOR UPDATE`,
+      [shop.id],
+    );
 
-      const activeResult = await client.query(
-        `SELECT id
-         FROM shop_queue
-         WHERE shop_id = $1
-           AND status = 'in_service'
-         LIMIT 1`,
-        [shop.id],
-      );
+    const active = await client.query(
+      `SELECT id
+       FROM public.shop_queue
+       WHERE shop_id = $1
+         AND queue_date =
+             (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+         AND status = 'in_service'
+       LIMIT 1`,
+      [shop.id],
+    );
 
-      if (activeResult.rowCount > 0) {
-        await client.query("ROLLBACK");
+    if (active.rowCount > 0) {
+      await client.query("ROLLBACK");
 
-        return res.status(409).json({
-          success: false,
-          message: "Complete the current service before starting another.",
-        });
-      }
-
-      const result = await client.query(
-        `UPDATE shop_queue
-         SET status = 'in_service',
-             started_at = CURRENT_TIMESTAMP
-         WHERE id = $1
-           AND shop_id = $2
-           AND status = 'waiting'
-         RETURNING *`,
-        [Number(id), shop.id],
-      );
-
-      if (result.rowCount === 0) {
-        await client.query("ROLLBACK");
-
-        return res.status(404).json({
-          success: false,
-          message: "Waiting queue entry not found.",
-        });
-      }
-
-      await client.query("COMMIT");
-
-      return res.status(200).json({
-        success: true,
-        message: "Service started.",
-        queue_entry: result.rows[0],
+      return res.status(409).json({
+        success: false,
+        message: "Complete the current service before starting another.",
       });
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => {});
-      throw error;
-    } finally {
-      client.release();
     }
+
+    // Enforce FIFO queue order.
+    const next = await client.query(
+      `SELECT id
+       FROM public.shop_queue
+       WHERE shop_id = $1
+         AND queue_date =
+             (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+         AND status = 'waiting'
+       ORDER BY created_at ASC, id ASC
+       LIMIT 1
+       FOR UPDATE`,
+      [shop.id],
+    );
+
+    if (next.rowCount === 0 || Number(next.rows[0].id) !== Number(id)) {
+      await client.query("ROLLBACK");
+
+      return res.status(409).json({
+        success: false,
+        message: "Please serve customers in queue order.",
+      });
+    }
+
+    const result = await client.query(
+      `UPDATE public.shop_queue
+       SET status = 'in_service',
+           started_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+         AND shop_id = $2
+         AND queue_date =
+             (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+         AND status = 'waiting'
+       RETURNING *`,
+      [Number(id), shop.id],
+    );
+
+    if (result.rowCount === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        success: false,
+        message: "Waiting queue entry not found.",
+      });
+    }
+
+    await client.query("COMMIT");
+
+    return res.status(200).json({
+      success: true,
+      message: "Service started.",
+      queue_entry: result.rows[0],
+    });
   } catch (error) {
+    if (client) {
+      await client.query("ROLLBACK").catch(() => {});
+    }
+
     console.error("Start queue service error:", error.message);
 
     return res.status(500).json({
       success: false,
       message: "Unable to start the service.",
     });
+  } finally {
+    if (client) {
+      client.release();
+    }
   }
 };
 
-// Owner: complete a service
+// Owner: complete a service.
 const completeService = async (req, res) => {
   try {
     const { id } = req.params;
@@ -304,11 +370,13 @@ const completeService = async (req, res) => {
     }
 
     const result = await pool.query(
-      `UPDATE shop_queue
+      `UPDATE public.shop_queue
        SET status = 'completed',
            completed_at = CURRENT_TIMESTAMP
        WHERE id = $1
          AND shop_id = $2
+         AND queue_date =
+             (NOW() AT TIME ZONE 'Asia/Kolkata')::date
          AND status = 'in_service'
        RETURNING *`,
       [Number(id), shop.id],
@@ -336,7 +404,7 @@ const completeService = async (req, res) => {
   }
 };
 
-// Owner: cancel a waiting queue entry
+// Owner: cancel a waiting customer.
 const cancelQueueEntry = async (req, res) => {
   try {
     const { id } = req.params;
@@ -358,7 +426,7 @@ const cancelQueueEntry = async (req, res) => {
     }
 
     const result = await pool.query(
-      `UPDATE shop_queue
+      `UPDATE public.shop_queue
        SET status = 'cancelled'
        WHERE id = $1
          AND shop_id = $2
@@ -389,7 +457,9 @@ const cancelQueueEntry = async (req, res) => {
   }
 };
 
-// Customer: view crowd information for an active shop
+// Customer: today's live crowd and estimated wait.
+// Confirmed online appointments for today are included because
+// appointmentController inserts them into shop_queue on confirmation.
 const getShopCrowd = async (req, res) => {
   try {
     const { shopId } = req.params;
@@ -404,12 +474,17 @@ const getShopCrowd = async (req, res) => {
     const result = await pool.query(
       `SELECT
          q.status,
+         q.started_at,
          ss.duration_minutes
-       FROM shop_queue q
-       JOIN shop_services ss ON ss.id = q.service_id
-       JOIN barber_shops bs ON bs.id = q.shop_id
+       FROM public.shop_queue q
+       JOIN public.shop_services ss
+         ON ss.id = q.service_id
+       JOIN public.barber_shops bs
+         ON bs.id = q.shop_id
        WHERE q.shop_id = $1
          AND bs.is_active = TRUE
+         AND q.queue_date =
+             (NOW() AT TIME ZONE 'Asia/Kolkata')::date
          AND q.status IN ('waiting', 'in_service')
        ORDER BY
          CASE WHEN q.status = 'in_service' THEN 0 ELSE 1 END,
@@ -418,18 +493,11 @@ const getShopCrowd = async (req, res) => {
       [Number(shopId)],
     );
 
-    const waiting = result.rows.filter(
-      (entry) => entry.status === "waiting",
-    );
+    const queue = result.rows;
 
-    const inService = result.rows.filter(
-      (entry) => entry.status === "in_service",
-    );
+    const waiting = queue.filter((entry) => entry.status === "waiting");
 
-    const estimatedWaitMinutes = result.rows.reduce(
-      (total, entry) => total + Number(entry.duration_minutes),
-      0,
-    );
+    const inService = queue.filter((entry) => entry.status === "in_service");
 
     return res.status(200).json({
       success: true,
@@ -437,13 +505,9 @@ const getShopCrowd = async (req, res) => {
       crowd: {
         waiting: waiting.length,
         in_service: inService.length,
-        estimated_wait_minutes: estimatedWaitMinutes,
+        estimated_wait_minutes: estimateWait(queue),
         level:
-          waiting.length < 3
-            ? "low"
-            : waiting.length < 7
-              ? "moderate"
-              : "busy",
+          waiting.length < 3 ? "low" : waiting.length < 7 ? "moderate" : "busy",
       },
     });
   } catch (error) {
