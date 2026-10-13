@@ -15,6 +15,7 @@ import OwnerAppointments from "./pages/owner/OwnerAppointments";
 import OwnerServices from "./pages/owner/OwnerServices";
 import OwnerProfile from "./pages/owner/OwnerProfile";
 import OwnerReportsPage from "./pages/owner/OwnerReportsPage";
+import OwnerQueue from "./pages/owner/OwnerQueue";
 
 import CustomerDashboard from "./pages/customer/CustomerDashboard";
 import CustomerShops from "./pages/customer/CustomerShops";
@@ -52,6 +53,7 @@ function AppRoutes() {
           <Route path="/owner/appointments" element={<OwnerAppointments />} />
           <Route path="/owner/services" element={<OwnerServices />} />
           <Route path="/owner/profile" element={<OwnerProfile />} />
+          <Route path="/owner/queue" element={<OwnerQueue />} />
         </Route>
 
         {/* Admin routes */}

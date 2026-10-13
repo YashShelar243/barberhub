@@ -11,6 +11,7 @@ const appointmentRoutes = require("./routes/appointmentRoutes");
 const serviceRoutes = require("./routes/serviceRoutes");
 const reportRoutes = require("./routes/reportRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
+const queueRoutes = require("./routes/queueRoutes");
 
 const app = express();
 
@@ -26,6 +27,7 @@ app.use("/api/appointments", appointmentRoutes);
 app.use("/api/services", serviceRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/queue", queueRoutes);
 
 // Root endpoint
 app.get("/", (req, res) => {
