@@ -250,10 +250,24 @@ const createAppointment = async (req, res) => {
     await client.query("COMMIT");
     transactionStarted = false;
 
+    const appointment = result.rows[0];
+
+    await createNotification({
+      userId: req.user.id,
+      appointmentId: appointment.id,
+      title: "Appointment request received",
+      message: `Your ${appointment.service_name} appointment on ${String(
+        appointment.appointment_date,
+      ).slice(0, 10)} at ${String(appointment.appointment_time).slice(
+        0,
+        5,
+      )} has been requested and is waiting for shop confirmation.`,
+    });
+
     return res.status(201).json({
       success: true,
       message: "Appointment requested successfully.",
-      appointment: result.rows[0],
+      appointment,
     });
   } catch (error) {
     if (client && transactionStarted) {
@@ -471,21 +485,37 @@ const updateAppointmentStatus = async (req, res) => {
     transactionStarted = false;
 
     // Notify the customer after the transaction commits.
-    if (status === "confirmed" || status === "rejected") {
-      const dateText = String(appointment.appointment_date).slice(0, 10);
-      const timeText = String(appointment.appointment_time).slice(0, 5);
+
+    const dateText = String(appointment.appointment_date).slice(0, 10);
+    const timeText = String(appointment.appointment_time).slice(0, 5);
+
+    if (
+      status === "confirmed" ||
+      status === "rejected" ||
+      status === "completed"
+    ) {
+      const notificationDetails = {
+        confirmed: {
+          title: "Appointment confirmed",
+          message: `Your ${appointment.service_name} appointment on ${dateText} at ${timeText} has been confirmed.`,
+        },
+        rejected: {
+          title: "Appointment rejected",
+          message: `Your ${appointment.service_name} appointment on ${dateText} at ${timeText} has been rejected. Please book another slot.`,
+        },
+        completed: {
+          title: "Service completed",
+          message: `Your ${appointment.service_name} appointment on ${dateText} at ${timeText} has been marked as completed. Thank you for visiting us!`,
+        },
+      };
+
+      const notification = notificationDetails[status];
 
       await createNotification({
         userId: appointment.customer_id,
         appointmentId: appointment.id,
-        title:
-          status === "confirmed"
-            ? "Appointment confirmed"
-            : "Appointment rejected",
-        message:
-          status === "confirmed"
-            ? `Your ${appointment.service_name} appointment on ${dateText} at ${timeText} has been confirmed.`
-            : `Your ${appointment.service_name} appointment on ${dateText} at ${timeText} has been rejected. Please book another slot.`,
+        title: notification.title,
+        message: notification.message,
       });
     }
 
