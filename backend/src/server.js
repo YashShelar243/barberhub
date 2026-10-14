@@ -13,6 +13,7 @@ const reportRoutes = require("./routes/reportRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const queueRoutes = require("./routes/queueRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
+const expenseRoutes = require("./routes/expenseRoutes");
 
 const app = express();
 
@@ -30,6 +31,7 @@ app.use("/api/reports", reportRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/queue", queueRoutes);
 app.use("/api/payments", paymentRoutes);
+app.use("/api/expenses", expenseRoutes);
 
 // Root endpoint
 app.get("/", (req, res) => {

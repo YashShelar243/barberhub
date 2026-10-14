@@ -17,6 +17,7 @@ const navigationByRole = {
     { label: "Manage Appointments", path: "/owner/appointments" },
     { label: "Queue Management", path: "/owner/queue" },
     { label: "Payments & Receipts", path: "/owner/payments" },
+    { label: "Expense Management", path: "/owner/expenses" },
     { label: "My Profile", path: "/owner/profile" },
   ],
   admin: [{ label: "Dashboard", path: "/admin/dashboard" }],
