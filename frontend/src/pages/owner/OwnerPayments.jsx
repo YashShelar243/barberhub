@@ -10,7 +10,12 @@ const formatCurrency = (amount) =>
 
 const formatDate = (date) => {
   if (!date) return "—";
-  return new Date(date).toLocaleString("en-IN", {
+
+  const parsedDate = new Date(date);
+
+  if (Number.isNaN(parsedDate.getTime())) return "—";
+
+  return parsedDate.toLocaleString("en-IN", {
     dateStyle: "medium",
     timeStyle: "short",
   });
@@ -105,6 +110,7 @@ export default function OwnerPayments() {
     try {
       const response = await api.get(`/payments/${id}`);
       setActiveReceipt(response.data.receipt);
+
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       setError(err.response?.data?.message || "Unable to load this receipt.");
@@ -112,6 +118,11 @@ export default function OwnerPayments() {
   };
 
   const printReceipt = () => {
+    if (!activeReceipt) {
+      setError("Please select a receipt before printing.");
+      return;
+    }
+
     window.print();
   };
 
@@ -122,24 +133,55 @@ export default function OwnerPayments() {
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-6 text-gray-900 dark:bg-gray-950 dark:text-white sm:px-6 lg:px-8">
       <style>{`
+        @page {
+          size: A4;
+          margin: 12mm;
+        }
+
         @media print {
+          html,
+          body,
+          #root {
+            min-height: 0 !important;
+            height: auto !important;
+            overflow: visible !important;
+            background: #ffffff !important;
+          }
+
           body * {
             visibility: hidden !important;
           }
+
           .receipt-print,
           .receipt-print * {
             visibility: visible !important;
           }
+
           .receipt-print {
+            display: block !important;
             position: absolute !important;
             left: 0 !important;
             top: 0 !important;
             width: 100% !important;
-            background: white !important;
-            color: black !important;
-            box-shadow: none !important;
+            max-width: none !important;
+            margin: 0 !important;
+            padding: 8mm !important;
+            color: #000000 !important;
+            background: #ffffff !important;
             border: none !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            overflow: visible !important;
+            box-sizing: border-box !important;
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
           }
+
+          .receipt-print * {
+            color: #000000 !important;
+            text-shadow: none !important;
+          }
+
           .no-print {
             display: none !important;
           }
@@ -192,9 +234,11 @@ export default function OwnerPayments() {
           </div>
         </div>
 
-        <div className="no-print grid items-start gap-6 lg:grid-cols-2">
-          <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
+        {/* Keep this grid visible to print; hide only the payment form. */}
+        <div className="grid items-start gap-6 lg:grid-cols-2">
+          <section className="no-print rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
             <h2 className="text-lg font-semibold">Record a payment</h2>
+
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
               Only completed services without an existing receipt appear here.
             </p>
@@ -212,6 +256,7 @@ export default function OwnerPayments() {
                   >
                     Completed service
                   </label>
+
                   <select
                     id="completed-service"
                     value={selectedService}
@@ -220,6 +265,7 @@ export default function OwnerPayments() {
                     className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm outline-none focus:border-blue-500 dark:border-gray-700 dark:bg-gray-800"
                   >
                     <option value="">Select a service</option>
+
                     {services.map((service) => (
                       <option
                         key={`${service.source_type}:${service.source_id}`}
@@ -253,6 +299,7 @@ export default function OwnerPayments() {
                               {service.source_type} · {service.customer_name}
                             </p>
                           </div>
+
                           <p className="text-lg font-bold">
                             {formatCurrency(service.amount)}
                           </p>
@@ -268,6 +315,7 @@ export default function OwnerPayments() {
                   >
                     Payment method
                   </label>
+
                   <select
                     id="payment-method"
                     value={paymentMethod}
@@ -297,11 +345,12 @@ export default function OwnerPayments() {
             )}
           </section>
 
+          {/* Do not add no-print to this section or its receipt container. */}
           <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
-            <h2 className="text-lg font-semibold">Receipt preview</h2>
+            <h2 className="no-print text-lg font-semibold">Receipt preview</h2>
 
             {!activeReceipt ? (
-              <div className="mt-5 rounded-lg border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500 dark:border-gray-700">
+              <div className="no-print mt-5 rounded-lg border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500 dark:border-gray-700">
                 Record a payment or select a receipt from the history to view
                 it.
               </div>
@@ -311,57 +360,67 @@ export default function OwnerPayments() {
                   <h3 className="text-xl font-bold">
                     {activeReceipt.shop_name || "BarberHub Shop"}
                   </h3>
+
                   {activeReceipt.shop_address && (
                     <p className="mt-1 text-sm">{activeReceipt.shop_address}</p>
                   )}
+
                   {activeReceipt.shop_city && (
                     <p className="text-sm">{activeReceipt.shop_city}</p>
                   )}
+
                   {activeReceipt.shop_phone && (
                     <p className="mt-1 text-sm">
                       Phone: {activeReceipt.shop_phone}
                     </p>
                   )}
+
                   {activeReceipt.shop_email && (
                     <p className="text-sm">{activeReceipt.shop_email}</p>
                   )}
+
                   <div className="my-4 border-t border-dashed border-gray-300" />
                   <h4 className="text-lg font-bold">PAYMENT RECEIPT</h4>
                 </div>
 
                 <div className="mt-5 space-y-3 text-sm">
                   <div className="flex justify-between gap-4">
-                    <span className="text-gray-500">Receipt number</span>
+                    <span>Receipt number</span>
                     <span className="text-right font-semibold">
                       {activeReceipt.receipt_number}
                     </span>
                   </div>
+
                   <div className="flex justify-between gap-4">
-                    <span className="text-gray-500">Customer</span>
+                    <span>Customer</span>
                     <span className="text-right font-medium">
                       {activeReceipt.customer_name}
                     </span>
                   </div>
+
                   <div className="flex justify-between gap-4">
-                    <span className="text-gray-500">Service</span>
+                    <span>Service</span>
                     <span className="text-right font-medium">
                       {activeReceipt.service_name}
                     </span>
                   </div>
+
                   <div className="flex justify-between gap-4">
-                    <span className="text-gray-500">Payment date</span>
+                    <span>Payment date</span>
                     <span className="text-right">
                       {formatDate(activeReceipt.paid_at)}
                     </span>
                   </div>
+
                   <div className="flex justify-between gap-4">
-                    <span className="text-gray-500">Payment method</span>
+                    <span>Payment method</span>
                     <span className="text-right capitalize">
                       {activeReceipt.payment_method}
                     </span>
                   </div>
+
                   <div className="flex justify-between gap-4">
-                    <span className="text-gray-500">Status</span>
+                    <span>Status</span>
                     <span className="font-semibold capitalize">
                       {activeReceipt.payment_status}
                     </span>
@@ -369,11 +428,13 @@ export default function OwnerPayments() {
                 </div>
 
                 <div className="my-5 border-t border-dashed border-gray-300" />
+
                 <div className="flex items-center justify-between gap-3 text-lg font-bold">
                   <span>Total paid</span>
                   <span>{formatCurrency(activeReceipt.amount)}</span>
                 </div>
-                <p className="mt-6 text-center text-xs text-gray-500">
+
+                <p className="mt-6 text-center text-xs">
                   Thank you for visiting!
                 </p>
 
@@ -399,6 +460,7 @@ export default function OwnerPayments() {
                 Your latest recorded receipts.
               </p>
             </div>
+
             <button
               type="button"
               onClick={fetchData}
@@ -429,6 +491,7 @@ export default function OwnerPayments() {
                     <th className="px-5 py-3 font-medium">Action</th>
                   </tr>
                 </thead>
+
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                   {receipts.map((receipt) => (
                     <tr
