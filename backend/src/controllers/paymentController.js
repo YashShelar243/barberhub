@@ -8,20 +8,13 @@ async function getOwnerShop(ownerId) {
      LIMIT 1`,
     [ownerId],
   );
-  console.log("Payment API owner/shop check:", {
-    ownerId,
-    foundShop: Boolean(result.rows[0]),
-    shopId: result.rows[0]?.id,
-  });
-
-  return result.rows[0] || null;
 
   return result.rows[0] || null;
 }
 
 // Owner: record payment for a completed appointment or walk-in.
 const createPayment = async (req, res) => {
-  const { appointment_id, queue_id, payment_method } = req.body;
+  const { appointment_id, queue_id, payment_method } = req.body || {};
 
   if (
     !["cash", "upi", "card"].includes(payment_method) ||
@@ -133,6 +126,14 @@ const createPayment = async (req, res) => {
       }
     }
 
+    if (source.amount == null || Number(source.amount) < 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        success: false,
+        message: "A valid service price is required to record payment.",
+      });
+    }
+
     const receiptNumber = `BH-${Date.now()}-${Math.floor(Math.random() * 10000)
       .toString()
       .padStart(4, "0")}`;
@@ -158,7 +159,7 @@ const createPayment = async (req, res) => {
         appointment_id ? Number(sourceId) : null,
         queue_id ? Number(sourceId) : null,
         source.customer_id,
-        source.customer_name,
+        source.customer_name || "Walk-in Customer",
         source.service_name,
         source.amount,
         payment_method,
@@ -200,6 +201,78 @@ const createPayment = async (req, res) => {
     });
   } finally {
     if (client) client.release();
+  }
+};
+
+// Owner: list completed services that do not have receipts yet.
+const getEligibleServices = async (req, res) => {
+  try {
+    const shop = await getOwnerShop(req.user.id);
+
+    if (!shop) {
+      return res.status(404).json({
+        success: false,
+        message: "No barber shop found for this owner.",
+      });
+    }
+
+    const result = await pool.query(
+      `SELECT *
+       FROM (
+         SELECT
+           'appointment'::text AS source_type,
+           a.id AS source_id,
+           u.name AS customer_name,
+           a.service_name,
+           a.service_price AS amount,
+           a.created_at AS completed_at
+         FROM public.appointments a
+         JOIN public.users u ON u.id = a.customer_id
+         WHERE a.shop_id = $1
+           AND a.status = 'completed'
+           AND a.service_price IS NOT NULL
+           AND NOT EXISTS (
+             SELECT 1
+             FROM public.payments p
+             WHERE p.appointment_id = a.id
+           )
+
+         UNION ALL
+
+         SELECT
+           'queue'::text AS source_type,
+           q.id AS source_id,
+           COALESCE(q.customer_name, 'Walk-in Customer') AS customer_name,
+           ss.name AS service_name,
+           COALESCE(q.service_price, ss.price) AS amount,
+           q.completed_at AS completed_at
+         FROM public.shop_queue q
+         JOIN public.shop_services ss ON ss.id = q.service_id
+         WHERE q.shop_id = $1
+           AND q.status = 'completed'
+           AND q.appointment_id IS NULL
+           AND COALESCE(q.service_price, ss.price) IS NOT NULL
+           AND NOT EXISTS (
+             SELECT 1
+             FROM public.payments p
+             WHERE p.queue_id = q.id
+           )
+       ) AS eligible
+       ORDER BY completed_at DESC NULLS LAST`,
+      [shop.id],
+    );
+
+    return res.status(200).json({
+      success: true,
+      services: result.rows,
+    });
+  } catch (error) {
+    console.error("Get eligible services error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to fetch services awaiting payment.",
+    });
   }
 };
 
@@ -307,6 +380,7 @@ const getPaymentById = async (req, res) => {
 
 module.exports = {
   createPayment,
+  getEligibleServices,
   getPayments,
   getPaymentById,
 };
