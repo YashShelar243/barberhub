@@ -17,8 +17,18 @@ const initialReports = {
     today_revenue: 0,
     monthly_revenue: 0,
   },
+  customerAnalytics: {
+    total_customers: 0,
+    repeat_customers: 0,
+  },
   dailyRevenue: [],
   popularServices: [],
+  topCustomers: [],
+  monthlyRevenueTrend: [],
+  walkIns: {
+    active_walk_ins: 0,
+    completed_walk_ins: 0,
+  },
 };
 
 const money = (value) =>
@@ -94,25 +104,44 @@ export default function OwnerReports() {
 
       try {
         const response = await api.get("/reports/owner");
+        const data = response.data || {};
 
         if (cancelled) return;
 
         setReports({
           ...initialReports,
-          ...response.data,
+          ...data,
           appointments: {
             ...initialReports.appointments,
-            ...response.data.appointments,
+            ...(data.appointments || {}),
           },
           revenue: {
             ...initialReports.revenue,
-            ...response.data.revenue,
+            ...(data.revenue || {}),
           },
-          dailyRevenue: response.data.dailyRevenue || [],
-          popularServices: response.data.popularServices || [],
+          customerAnalytics: {
+            ...initialReports.customerAnalytics,
+            ...(data.customerAnalytics || {}),
+          },
+          walkIns: {
+            ...initialReports.walkIns,
+            ...(data.walkIns || {}),
+          },
+          dailyRevenue: Array.isArray(data.dailyRevenue)
+            ? data.dailyRevenue
+            : [],
+          popularServices: Array.isArray(data.popularServices)
+            ? data.popularServices
+            : [],
+          topCustomers: Array.isArray(data.topCustomers)
+            ? data.topCustomers
+            : [],
+          monthlyRevenueTrend: Array.isArray(data.monthlyRevenueTrend)
+            ? data.monthlyRevenueTrend
+            : [],
         });
 
-        setShopName(response.data.shop?.name || "");
+        setShopName(data.shop?.name || "");
       } catch (err) {
         if (!cancelled) {
           setError(
@@ -132,7 +161,7 @@ export default function OwnerReports() {
     };
   }, []);
 
-  // Export reports to Excel
+  // Export all report summaries and analytics to Excel.
   const handleExportExcel = () => {
     try {
       const workbook = XLSX.utils.book_new();
@@ -143,8 +172,14 @@ export default function OwnerReports() {
         ["Generated On", new Date().toLocaleString("en-IN")],
         [],
         ["Metric", "Value"],
-        ["Today's Revenue (INR)", Number(reports.revenue.today_revenue) || 0],
-        ["Monthly Revenue (INR)", Number(reports.revenue.monthly_revenue) || 0],
+        [
+          "Today's Estimated Revenue (INR)",
+          Number(reports.revenue.today_revenue) || 0,
+        ],
+        [
+          "Monthly Estimated Revenue (INR)",
+          Number(reports.revenue.monthly_revenue) || 0,
+        ],
         [
           "Total Appointments",
           Number(reports.appointments.total_appointments) || 0,
@@ -154,45 +189,97 @@ export default function OwnerReports() {
         ["Completed Appointments", Number(reports.appointments.completed) || 0],
         ["Cancelled Appointments", Number(reports.appointments.cancelled) || 0],
         ["Rejected Appointments", Number(reports.appointments.rejected) || 0],
+        ["Active Walk-ins", Number(reports.walkIns.active_walk_ins) || 0],
+        ["Completed Walk-ins", Number(reports.walkIns.completed_walk_ins) || 0],
+        [],
+        [
+          "Total Registered Customers",
+          Number(reports.customerAnalytics.total_customers) || 0,
+        ],
+        [
+          "Repeat Customers",
+          Number(reports.customerAnalytics.repeat_customers) || 0,
+        ],
         [],
         [
           "Revenue Note",
-          "Revenue is estimated from completed appointments and recorded service prices. Payment collection is not verified.",
+          "Estimated revenue uses completed service prices. Collected revenue uses recorded paid payments after discounts.",
         ],
       ];
 
       const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
-      summarySheet["!cols"] = [{ wch: 32 }, { wch: 95 }];
-
+      summarySheet["!cols"] = [{ wch: 36 }, { wch: 95 }];
       XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
 
       const dailyData = reports.dailyRevenue.map((day) => ({
         Date: day.date,
-        "Completed Appointments": Number(day.completed_appointments) || 0,
-        "Revenue (INR)": Number(day.revenue) || 0,
+        "Completed Services": Number(day.completed_appointments) || 0,
+        "Estimated Revenue (INR)": Number(day.revenue) || 0,
       }));
 
       const dailySheet = XLSX.utils.json_to_sheet(dailyData, {
-        header: ["Date", "Completed Appointments", "Revenue (INR)"],
+        header: ["Date", "Completed Services", "Estimated Revenue (INR)"],
       });
-
-      dailySheet["!cols"] = [{ wch: 16 }, { wch: 25 }, { wch: 18 }];
-
+      dailySheet["!cols"] = [{ wch: 16 }, { wch: 24 }, { wch: 25 }];
       XLSX.utils.book_append_sheet(workbook, dailySheet, "Daily Revenue");
 
       const serviceData = reports.popularServices.map((service) => ({
         "Service Name": service.service_name,
         "Completed Bookings": Number(service.bookings) || 0,
-        "Revenue (INR)": Number(service.revenue) || 0,
+        "Estimated Revenue (INR)": Number(service.revenue) || 0,
       }));
 
       const servicesSheet = XLSX.utils.json_to_sheet(serviceData, {
-        header: ["Service Name", "Completed Bookings", "Revenue (INR)"],
+        header: [
+          "Service Name",
+          "Completed Bookings",
+          "Estimated Revenue (INR)",
+        ],
       });
-
-      servicesSheet["!cols"] = [{ wch: 30 }, { wch: 22 }, { wch: 18 }];
-
+      servicesSheet["!cols"] = [{ wch: 30 }, { wch: 22 }, { wch: 25 }];
       XLSX.utils.book_append_sheet(workbook, servicesSheet, "Popular Services");
+
+      const customerData = reports.topCustomers.map((customer, index) => ({
+        Rank: index + 1,
+        Customer: customer.name || "Customer",
+        Phone: customer.phone || "",
+        "Recorded Payments": Number(customer.payment_count) || 0,
+        "Total Spent (INR)": Number(customer.total_spent) || 0,
+      }));
+
+      const customersSheet = XLSX.utils.json_to_sheet(customerData, {
+        header: [
+          "Rank",
+          "Customer",
+          "Phone",
+          "Recorded Payments",
+          "Total Spent (INR)",
+        ],
+      });
+      customersSheet["!cols"] = [
+        { wch: 10 },
+        { wch: 28 },
+        { wch: 18 },
+        { wch: 20 },
+        { wch: 22 },
+      ];
+      XLSX.utils.book_append_sheet(workbook, customersSheet, "Top Customers");
+
+      const monthlyData = reports.monthlyRevenueTrend.map((month) => ({
+        Month: month.month_label || month.month,
+        "Collected Revenue (INR)": Number(month.revenue) || 0,
+        "Paid Transactions": Number(month.payment_count) || 0,
+      }));
+
+      const monthlySheet = XLSX.utils.json_to_sheet(monthlyData, {
+        header: ["Month", "Collected Revenue (INR)", "Paid Transactions"],
+      });
+      monthlySheet["!cols"] = [{ wch: 18 }, { wch: 27 }, { wch: 22 }];
+      XLSX.utils.book_append_sheet(
+        workbook,
+        monthlySheet,
+        "Monthly Collections",
+      );
 
       const safeShopName = (shopName || "BarberHub")
         .replace(/[<>:"/\\|?*]/g, "_")
@@ -207,7 +294,7 @@ export default function OwnerReports() {
     }
   };
 
-  // Export reports to PDF
+  // Export reports and customer analytics to PDF.
   const handleExportPDF = () => {
     try {
       const doc = new jsPDF();
@@ -224,8 +311,8 @@ export default function OwnerReports() {
         startY: 45,
         head: [["Metric", "Value"]],
         body: [
-          ["Today's Revenue", money(reports.revenue.today_revenue)],
-          ["Monthly Revenue", money(reports.revenue.monthly_revenue)],
+          ["Today's Estimated Revenue", money(reports.revenue.today_revenue)],
+          ["Monthly Estimated Revenue", money(reports.revenue.monthly_revenue)],
           [
             "Total Appointments",
             String(reports.appointments.total_appointments),
@@ -235,6 +322,16 @@ export default function OwnerReports() {
           ["Completed", String(reports.appointments.completed)],
           ["Cancelled", String(reports.appointments.cancelled)],
           ["Rejected", String(reports.appointments.rejected)],
+          ["Active Walk-ins", String(reports.walkIns.active_walk_ins)],
+          ["Completed Walk-ins", String(reports.walkIns.completed_walk_ins)],
+          [
+            "Total Registered Customers",
+            String(reports.customerAnalytics.total_customers),
+          ],
+          [
+            "Repeat Customers",
+            String(reports.customerAnalytics.repeat_customers),
+          ],
         ],
         theme: "grid",
         headStyles: { fillColor: [37, 99, 235] },
@@ -243,17 +340,74 @@ export default function OwnerReports() {
 
       let nextY = doc.lastAutoTable.finalY + 12;
 
-      if (nextY > 250) {
+      if (nextY > 245) {
         doc.addPage();
         nextY = 20;
       }
 
       doc.setFontSize(14);
-      doc.text("Daily Revenue (Last 7 Days)", 14, nextY);
+      doc.text("Monthly Collected Revenue (Last 6 Months)", 14, nextY);
 
       autoTable(doc, {
         startY: nextY + 5,
-        head: [["Date", "Completed Appointments", "Revenue"]],
+        head: [["Month", "Collected Revenue", "Paid Transactions"]],
+        body: reports.monthlyRevenueTrend.length
+          ? reports.monthlyRevenueTrend.map((month) => [
+              String(month.month_label || month.month || ""),
+              money(month.revenue),
+              String(Number(month.payment_count) || 0),
+            ])
+          : [["No data available", "-", "-"]],
+        theme: "grid",
+        headStyles: { fillColor: [126, 34, 206] },
+        styles: { fontSize: 9 },
+      });
+
+      nextY = doc.lastAutoTable.finalY + 12;
+
+      if (nextY > 245) {
+        doc.addPage();
+        nextY = 20;
+      }
+
+      doc.setFontSize(14);
+      doc.text("Top 5 Customers by Recorded Spending", 14, nextY);
+
+      autoTable(doc, {
+        startY: nextY + 5,
+        head: [["Customer", "Phone", "Payments", "Total Spent"]],
+        body: reports.topCustomers.length
+          ? reports.topCustomers.map((customer) => [
+              String(customer.name || "Customer"),
+              String(customer.phone || "-"),
+              String(Number(customer.payment_count) || 0),
+              money(customer.total_spent),
+            ])
+          : [["No customers available", "-", "-", "-"]],
+        theme: "grid",
+        headStyles: { fillColor: [22, 163, 74] },
+        styles: { fontSize: 8 },
+        columnStyles: {
+          0: { cellWidth: 55 },
+          1: { cellWidth: 35 },
+          2: { cellWidth: 25 },
+          3: { cellWidth: 40 },
+        },
+      });
+
+      let nextSectionY = doc.lastAutoTable.finalY + 12;
+
+      if (nextSectionY > 245) {
+        doc.addPage();
+        nextSectionY = 20;
+      }
+
+      doc.setFontSize(14);
+      doc.text("Daily Revenue (Last 7 Days)", 14, nextSectionY);
+
+      autoTable(doc, {
+        startY: nextSectionY + 5,
+        head: [["Date", "Completed Services", "Estimated Revenue"]],
         body: reports.dailyRevenue.length
           ? reports.dailyRevenue.map((day) => [
               String(day.date),
@@ -266,19 +420,19 @@ export default function OwnerReports() {
         styles: { fontSize: 9 },
       });
 
-      nextY = doc.lastAutoTable.finalY + 12;
+      nextSectionY = doc.lastAutoTable.finalY + 12;
 
-      if (nextY > 250) {
+      if (nextSectionY > 245) {
         doc.addPage();
-        nextY = 20;
+        nextSectionY = 20;
       }
 
       doc.setFontSize(14);
-      doc.text("Popular Services", 14, nextY);
+      doc.text("Popular Services", 14, nextSectionY);
 
       autoTable(doc, {
-        startY: nextY + 5,
-        head: [["Service", "Completed Bookings", "Revenue"]],
+        startY: nextSectionY + 5,
+        head: [["Service", "Completed Bookings", "Estimated Revenue"]],
         body: reports.popularServices.length
           ? reports.popularServices.map((service) => [
               String(service.service_name || ""),
@@ -290,21 +444,6 @@ export default function OwnerReports() {
         headStyles: { fillColor: [37, 99, 235] },
         styles: { fontSize: 9 },
       });
-
-      let finalY = doc.lastAutoTable.finalY + 12;
-
-      if (finalY > 270) {
-        doc.addPage();
-        finalY = 20;
-      }
-
-      doc.setFontSize(9);
-      doc.text(
-        "Revenue is estimated from completed appointments and recorded service prices. Payment collection is not verified.",
-        14,
-        finalY,
-        { maxWidth: 180 },
-      );
 
       const safeShopName = (shopName || "BarberHub")
         .replace(/[<>:"/\\|?*]/g, "_")
@@ -324,10 +463,22 @@ export default function OwnerReports() {
     return card.group === "revenue" ? money(value) : value;
   };
 
-  const maxRevenue = Math.max(
+  const maxDailyRevenue = Math.max(
     1,
     ...reports.dailyRevenue.map((day) => Number(day.revenue) || 0),
   );
+
+  const maxMonthlyRevenue = Math.max(
+    1,
+    ...reports.monthlyRevenueTrend.map((month) => Number(month.revenue) || 0),
+  );
+
+  const sixMonthCollectedRevenue = reports.monthlyRevenueTrend.reduce(
+    (total, month) => total + (Number(month.revenue) || 0),
+    0,
+  );
+
+  const topCustomerSpending = Number(reports.topCustomers[0]?.total_spent || 0);
 
   const panelClass =
     "rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-900";
@@ -356,7 +507,7 @@ export default function OwnerReports() {
           </h2>
 
           <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-            {shopName || "Your shop"} · Revenue and appointment overview
+            {shopName || "Your shop"} · Business and customer analytics
           </p>
         </div>
 
@@ -407,6 +558,7 @@ export default function OwnerReports() {
 
       {!error && (
         <>
+          {/* Existing revenue and appointment cards */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {statCards.map((card) => (
               <article
@@ -424,22 +576,185 @@ export default function OwnerReports() {
             ))}
           </div>
 
+          {/* New customer analytics cards */}
+          <div>
+            <h3 className={`${headingClass} mb-4`}>Customer Analytics</h3>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <article className={panelClass}>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Total Registered Customers
+                </p>
+                <p className="mt-3 text-3xl font-bold text-blue-600 dark:text-blue-400">
+                  {Number(reports.customerAnalytics.total_customers) || 0}
+                </p>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  Customers linked to your shop
+                </p>
+              </article>
+
+              <article className={panelClass}>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Repeat Customers
+                </p>
+                <p className="mt-3 text-3xl font-bold text-green-600 dark:text-green-400">
+                  {Number(reports.customerAnalytics.repeat_customers) || 0}
+                </p>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  More than one recorded paid visit
+                </p>
+              </article>
+
+              <article className={panelClass}>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Six-Month Collected Revenue
+                </p>
+                <p className="mt-3 text-2xl font-bold text-purple-600 dark:text-purple-400">
+                  {money(sixMonthCollectedRevenue)}
+                </p>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  Recorded payments after discounts
+                </p>
+              </article>
+
+              <article className={panelClass}>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Top Customer Spending
+                </p>
+                <p className="mt-3 text-2xl font-bold text-amber-600 dark:text-amber-400">
+                  {money(topCustomerSpending)}
+                </p>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  Highest recorded customer spending
+                </p>
+              </article>
+            </div>
+          </div>
+
+          {/* Six-month collected-revenue chart */}
+          <div className={panelClass}>
+            <h3 className={headingClass}>Monthly Collected Revenue</h3>
+
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Actual recorded payments after discounts over the last six months
+            </p>
+
+            {reports.monthlyRevenueTrend.length === 0 ? (
+              <p className="mt-6 text-sm text-gray-500 dark:text-gray-400">
+                No payment data available for this period.
+              </p>
+            ) : (
+              <div className="mt-6 space-y-5">
+                {reports.monthlyRevenueTrend.map((month) => {
+                  const revenue = Number(month.revenue) || 0;
+                  const width = (revenue / maxMonthlyRevenue) * 100;
+
+                  return (
+                    <div key={month.month}>
+                      <div className="mb-2 flex flex-wrap justify-between gap-2 text-sm">
+                        <span className="font-medium text-gray-700 dark:text-gray-200">
+                          {month.month_label || month.month}
+                        </span>
+
+                        <span className="text-gray-600 dark:text-gray-300">
+                          {money(revenue)} · {Number(month.payment_count) || 0}{" "}
+                          payments
+                        </span>
+                      </div>
+
+                      <div className="h-3 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+                        <div
+                          className="h-full rounded-full bg-purple-600 transition-all"
+                          style={{ width: `${width}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Top five customers */}
+          <div className={panelClass}>
+            <h3 className={headingClass}>Top 5 Customers</h3>
+
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Ranked by actual recorded paid spending
+            </p>
+
+            {reports.topCustomers.length === 0 ? (
+              <p className="mt-6 text-sm text-gray-500 dark:text-gray-400">
+                No registered customers with recorded payments yet.
+              </p>
+            ) : (
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full min-w-[500px] text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200 text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                      <th className="py-3 pr-4 font-medium">Customer</th>
+                      <th className="py-3 pr-4 font-medium">Payments</th>
+                      <th className="py-3 text-right font-medium">
+                        Total Spent
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {reports.topCustomers.map((customer, index) => (
+                      <tr
+                        key={customer.id}
+                        className="border-b border-gray-100 last:border-0 dark:border-gray-800"
+                      >
+                        <td className="py-3 pr-4">
+                          <div className="flex items-center gap-3">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-50 text-sm font-bold text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                              {index + 1}
+                            </span>
+
+                            <div>
+                              <p className="font-medium text-gray-900 dark:text-white">
+                                {customer.name || "Customer"}
+                              </p>
+                              <p className="text-xs text-gray-500 dark:text-gray-400">
+                                {customer.phone || "No phone number"}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="py-3 pr-4 text-gray-600 dark:text-gray-300">
+                          {Number(customer.payment_count) || 0}
+                        </td>
+
+                        <td className="py-3 text-right font-semibold text-gray-900 dark:text-white">
+                          {money(customer.total_spent)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Existing daily revenue report */}
           <div className={panelClass}>
             <h3 className={headingClass}>Daily Revenue</h3>
 
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Completed appointments over the last seven calendar days
+              Completed services over the last seven calendar days
             </p>
 
             {reports.dailyRevenue.length === 0 ? (
               <p className="mt-6 text-sm text-gray-500 dark:text-gray-400">
-                No completed appointments in this period.
+                No completed services in this period.
               </p>
             ) : (
               <div className="mt-6 space-y-5">
                 {reports.dailyRevenue.map((day) => {
                   const revenue = Number(day.revenue) || 0;
-                  const width = (revenue / maxRevenue) * 100;
+                  const width = (revenue / maxDailyRevenue) * 100;
 
                   return (
                     <div key={day.date}>
@@ -455,8 +770,8 @@ export default function OwnerReports() {
                         </span>
 
                         <span className="text-gray-600 dark:text-gray-300">
-                          {money(revenue)} · {day.completed_appointments}{" "}
-                          appointments
+                          {money(revenue)} ·{" "}
+                          {Number(day.completed_appointments) || 0} services
                         </span>
                       </div>
 
@@ -473,11 +788,12 @@ export default function OwnerReports() {
             )}
           </div>
 
+          {/* Existing popular services report */}
           <div className={panelClass}>
             <h3 className={headingClass}>Popular Services</h3>
 
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Ranked by completed appointments
+              Ranked by completed service bookings
             </p>
 
             {reports.popularServices.length === 0 ? (
@@ -491,7 +807,9 @@ export default function OwnerReports() {
                     <tr className="border-b border-gray-200 text-gray-500 dark:border-gray-700 dark:text-gray-400">
                       <th className="py-3 pr-4 font-medium">Service</th>
                       <th className="py-3 pr-4 font-medium">Completed</th>
-                      <th className="py-3 text-right font-medium">Revenue</th>
+                      <th className="py-3 text-right font-medium">
+                        Estimated Revenue
+                      </th>
                     </tr>
                   </thead>
 
@@ -506,7 +824,7 @@ export default function OwnerReports() {
                         </td>
 
                         <td className="py-3 pr-4 text-gray-600 dark:text-gray-300">
-                          {service.bookings}
+                          {Number(service.bookings) || 0}
                         </td>
 
                         <td className="py-3 text-right text-gray-900 dark:text-white">
@@ -521,9 +839,10 @@ export default function OwnerReports() {
           </div>
 
           <p className="text-xs leading-5 text-gray-500 dark:text-gray-400">
-            Revenue figures are estimates calculated from completed appointments
-            and recorded service prices. They do not confirm that payment was
-            collected.
+            Estimated revenue is calculated from completed service prices and
+            does not confirm payment collection. Customer spending and monthly
+            collected revenue use recorded payments marked as paid, after
+            applicable discounts.
           </p>
         </>
       )}

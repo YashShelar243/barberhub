@@ -1,6 +1,6 @@
 const pool = require("../config/database");
 
-// Owner: get daily and monthly business reports.
+// Owner: get business reports and customer analytics.
 const getOwnerReports = async (req, res) => {
   try {
     const shopResult = await pool.query(
@@ -20,7 +20,7 @@ const getOwnerReports = async (req, res) => {
 
     const shopId = shopResult.rows[0].id;
 
-    // Keep the appointment statistics from the existing report.
+    // Existing appointment statistics.
     const statsResult = await pool.query(
       `SELECT
          COUNT(*)::int AS total_appointments,
@@ -34,8 +34,8 @@ const getOwnerReports = async (req, res) => {
       [shopId],
     );
 
-    // A common revenue source for completed appointments and walk-ins.
-    // Appointment-linked queue rows are excluded to prevent double-counting.
+    // Existing service-price revenue calculations.
+    // Appointment-linked queue entries are excluded to prevent double-counting.
     const revenueCte = `
       WITH completed_revenue AS (
         SELECT
@@ -120,7 +120,7 @@ const getOwnerReports = async (req, res) => {
       [shopId],
     );
 
-    // Report walk-ins separately from online appointments.
+    // Existing walk-in statistics.
     const walkInResult = await pool.query(
       `SELECT
          COUNT(*) FILTER (
@@ -135,6 +135,129 @@ const getOwnerReports = async (req, res) => {
       [shopId],
     );
 
+    // Count registered customers linked to this shop.
+    const customerStatsResult = await pool.query(
+      `WITH linked_customers AS (
+         SELECT customer_id
+         FROM public.appointments
+         WHERE shop_id = $1
+           AND customer_id IS NOT NULL
+
+         UNION
+
+         SELECT customer_id
+         FROM public.shop_queue
+         WHERE shop_id = $1
+           AND customer_id IS NOT NULL
+
+         UNION
+
+         SELECT customer_id
+         FROM public.payments
+         WHERE shop_id = $1
+           AND customer_id IS NOT NULL
+       ),
+       paid_visits AS (
+         SELECT
+           customer_id,
+           COUNT(*)::int AS visit_count,
+           COALESCE(SUM(amount), 0) AS total_spent
+         FROM public.payments
+         WHERE shop_id = $1
+           AND customer_id IS NOT NULL
+           AND payment_status = 'paid'
+         GROUP BY customer_id
+       )
+       SELECT
+         COUNT(*)::int AS total_customers,
+         COUNT(*) FILTER (
+           WHERE COALESCE(pv.visit_count, 0) > 1
+         )::int AS repeat_customers
+       FROM linked_customers lc
+       JOIN public.users u
+         ON u.id = lc.customer_id
+        AND u.role = 'customer'
+       LEFT JOIN paid_visits pv
+         ON pv.customer_id = lc.customer_id`,
+      [shopId],
+    );
+
+    // Top five registered customers by actual recorded paid spending.
+    const topCustomersResult = await pool.query(
+      `SELECT
+         p.customer_id AS id,
+         u.name,
+         u.phone,
+         COUNT(p.id)::int AS payment_count,
+         COALESCE(SUM(p.amount), 0) AS total_spent
+       FROM public.payments p
+       JOIN public.users u
+         ON u.id = p.customer_id
+        AND u.role = 'customer'
+       WHERE p.shop_id = $1
+         AND p.customer_id IS NOT NULL
+         AND p.payment_status = 'paid'
+       GROUP BY p.customer_id, u.name, u.phone
+       ORDER BY total_spent DESC, payment_count DESC, u.name ASC
+       LIMIT 5`,
+      [shopId],
+    );
+
+    // Six-month trend from actual recorded payments after discounts.
+    const monthlyTrendResult = await pool.query(
+      `WITH months AS (
+         SELECT generate_series(
+           date_trunc(
+             'month',
+             NOW() AT TIME ZONE 'Asia/Kolkata'
+           ) - INTERVAL '5 months',
+           date_trunc(
+             'month',
+             NOW() AT TIME ZONE 'Asia/Kolkata'
+           ),
+           INTERVAL '1 month'
+         )::date AS month_start
+       ),
+       paid_monthly AS (
+         SELECT
+           date_trunc(
+             'month',
+             COALESCE(p.paid_at, p.created_at)
+               AT TIME ZONE 'Asia/Kolkata'
+           )::date AS month_start,
+           COALESCE(SUM(p.amount), 0) AS revenue,
+           COUNT(*)::int AS payment_count
+         FROM public.payments p
+         WHERE p.shop_id = $1
+           AND p.payment_status = 'paid'
+           AND COALESCE(p.paid_at, p.created_at) >=
+             (
+               date_trunc(
+                 'month',
+                 NOW() AT TIME ZONE 'Asia/Kolkata'
+               ) - INTERVAL '5 months'
+             ) AT TIME ZONE 'Asia/Kolkata'
+           AND COALESCE(p.paid_at, p.created_at) <
+             (
+               date_trunc(
+                 'month',
+                 NOW() AT TIME ZONE 'Asia/Kolkata'
+               ) + INTERVAL '1 month'
+             ) AT TIME ZONE 'Asia/Kolkata'
+         GROUP BY 1
+       )
+       SELECT
+         TO_CHAR(m.month_start, 'YYYY-MM') AS month,
+         TO_CHAR(m.month_start, 'Mon YYYY') AS month_label,
+         COALESCE(pm.revenue, 0) AS revenue,
+         COALESCE(pm.payment_count, 0)::int AS payment_count
+       FROM months m
+       LEFT JOIN paid_monthly pm
+         ON pm.month_start = m.month_start
+       ORDER BY m.month_start ASC`,
+      [shopId],
+    );
+
     return res.status(200).json({
       success: true,
       shop: shopResult.rows[0],
@@ -143,6 +266,11 @@ const getOwnerReports = async (req, res) => {
       revenue: revenueResult.rows[0],
       dailyRevenue: dailyResult.rows,
       popularServices: servicesResult.rows,
+
+      // New customer analytics.
+      customerAnalytics: customerStatsResult.rows[0],
+      topCustomers: topCustomersResult.rows,
+      monthlyRevenueTrend: monthlyTrendResult.rows,
     });
   } catch (error) {
     console.error("Get owner reports error:", error.message);
