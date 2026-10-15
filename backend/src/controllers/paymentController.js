@@ -166,6 +166,56 @@ const createPayment = async (req, res) => {
       ],
     );
 
+    // Award loyalty points after recording a successful payment.
+    // Only registered customers can earn points.
+    if (source.customer_id) {
+      const earnedPoints = Math.floor(Number(source.amount) / 10);
+
+      if (earnedPoints > 0) {
+        // Update the customer's balance atomically.
+        await client.query(
+          `INSERT INTO public.customer_loyalty (
+             shop_id,
+             customer_id,
+             points_balance,
+             lifetime_points_earned,
+             updated_at
+           )
+           VALUES ($1, $2, $3, $3, NOW())
+           ON CONFLICT (shop_id, customer_id)
+           DO UPDATE SET
+             points_balance =
+               public.customer_loyalty.points_balance
+               + EXCLUDED.points_balance,
+             lifetime_points_earned =
+               public.customer_loyalty.lifetime_points_earned
+               + EXCLUDED.lifetime_points_earned,
+             updated_at = NOW()`,
+          [shop.id, source.customer_id, earnedPoints],
+        );
+
+        // Record the earning against this payment.
+        await client.query(
+          `INSERT INTO public.loyalty_transactions (
+             shop_id,
+             customer_id,
+             payment_id,
+             transaction_type,
+             points,
+             description
+           )
+           VALUES ($1, $2, $3, 'earned', $4, $5)`,
+          [
+            shop.id,
+            source.customer_id,
+            result.rows[0].id,
+            earnedPoints,
+            `Earned ${earnedPoints} points from payment`,
+          ],
+        );
+      }
+    }
+
     await client.query("COMMIT");
 
     return res.status(201).json({
