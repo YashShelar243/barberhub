@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import api from "../../services/api";
 
 const formatCurrency = (amount) =>
@@ -25,6 +25,7 @@ export default function OwnerPayments() {
   const [receipts, setReceipts] = useState([]);
   const [selectedService, setSelectedService] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [pointsRedeemed, setPointsRedeemed] = useState(0);
   const [activeReceipt, setActiveReceipt] = useState(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -57,6 +58,42 @@ export default function OwnerPayments() {
     fetchData();
   }, [fetchData]);
 
+  const selectedServiceData = useMemo(
+    () =>
+      services.find(
+        (item) => `${item.source_type}:${item.source_id}` === selectedService,
+      ) || null,
+    [services, selectedService],
+  );
+
+  const availablePoints = Number(selectedServiceData?.points_balance || 0);
+
+  const subtotal = Number(selectedServiceData?.amount || 0);
+
+  // 100 points = ₹10 discount.
+  // Never allow the discount to exceed the service price.
+  const maxRedeemablePoints = selectedServiceData?.customer_id
+    ? Math.min(
+        Math.floor(availablePoints / 100) * 100,
+        Math.floor(Math.round(subtotal * 100) / 1000) * 100,
+      )
+    : 0;
+
+  const validPointsRedeemed = Math.min(
+    Number(pointsRedeemed),
+    maxRedeemablePoints,
+  );
+
+  const discountAmount = (validPointsRedeemed / 100) * 10;
+  const finalAmount = Math.max(0, subtotal - discountAmount);
+
+  const handleServiceChange = (event) => {
+    setSelectedService(event.target.value);
+    setPointsRedeemed(0);
+    setError("");
+    setMessage("");
+  };
+
   const handlePayment = async (event) => {
     event.preventDefault();
     setError("");
@@ -72,11 +109,21 @@ export default function OwnerPayments() {
       return;
     }
 
+    if (
+      validPointsRedeemed > 0 &&
+      (!service.customer_id ||
+        validPointsRedeemed > Number(service.points_balance || 0))
+    ) {
+      setError("The selected customer does not have enough loyalty points.");
+      return;
+    }
+
     setSubmitting(true);
 
     try {
       const payload = {
         payment_method: paymentMethod,
+        points_redeemed: validPointsRedeemed,
         ...(service.source_type === "appointment"
           ? { appointment_id: service.source_id }
           : { queue_id: service.source_id }),
@@ -93,8 +140,15 @@ export default function OwnerPayments() {
         shop_city: response.data.shop?.city,
       });
 
-      setMessage("Payment recorded successfully. Invoice generated.");
+      setMessage(
+        `Payment recorded successfully. ${
+          response.data.loyalty?.pointsEarned || 0
+        } loyalty points earned.`,
+      );
+
       setSelectedService("");
+      setPointsRedeemed(0);
+
       await fetchData();
     } catch (err) {
       setError(err.response?.data?.message || "Unable to record payment.");
@@ -110,15 +164,16 @@ export default function OwnerPayments() {
     try {
       const response = await api.get(`/payments/${id}`);
       setActiveReceipt(response.data.receipt);
+
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
-      setError(err.response?.data?.message || "Unable to load this invoice.");
+      setError(err.response?.data?.message || "Unable to load this receipt.");
     }
   };
 
   const printReceipt = () => {
     if (!activeReceipt) {
-      setError("Please select an invoice before printing.");
+      setError("Please select a receipt before printing.");
       return;
     }
 
@@ -128,6 +183,16 @@ export default function OwnerPayments() {
   const totalCollected = receipts
     .filter((receipt) => receipt.payment_status === "paid")
     .reduce((sum, receipt) => sum + Number(receipt.amount || 0), 0);
+
+  const receiptSubtotal =
+    activeReceipt?.subtotal != null
+      ? Number(activeReceipt.subtotal)
+      : Number(activeReceipt?.amount || 0) +
+        Number(activeReceipt?.discount_amount || 0);
+
+  const receiptDiscount = Number(activeReceipt?.discount_amount || 0);
+
+  const receiptPoints = Number(activeReceipt?.points_redeemed || 0);
 
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-6 text-gray-900 dark:bg-gray-950 dark:text-white sm:px-6 lg:px-8">
@@ -193,7 +258,7 @@ export default function OwnerPayments() {
             Payments & Receipts
           </h1>
           <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-            Record completed service payments and manage customer invoices.
+            Record completed service payments and manage customer receipts.
           </p>
         </div>
 
@@ -218,7 +283,7 @@ export default function OwnerPayments() {
         <div className="no-print grid gap-4 sm:grid-cols-2">
           <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              Total invoices
+              Total receipts
             </p>
             <p className="mt-2 text-2xl font-bold">{receipts.length}</p>
           </div>
@@ -234,9 +299,9 @@ export default function OwnerPayments() {
         </div>
 
         <div className="grid items-start gap-6 lg:grid-cols-2">
-          {/* Record payment */}
           <section className="no-print rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
             <h2 className="text-lg font-semibold">Record a payment</h2>
+
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
               Only completed services without an existing receipt appear here.
             </p>
@@ -258,11 +323,12 @@ export default function OwnerPayments() {
                   <select
                     id="completed-service"
                     value={selectedService}
-                    onChange={(event) => setSelectedService(event.target.value)}
+                    onChange={handleServiceChange}
                     required
                     className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm outline-none focus:border-blue-500 dark:border-gray-700 dark:bg-gray-800"
                   >
                     <option value="">Select a service</option>
+
                     {services.map((service) => (
                       <option
                         key={`${service.source_type}:${service.source_id}`}
@@ -275,32 +341,97 @@ export default function OwnerPayments() {
                   </select>
                 </div>
 
-                {selectedService && (
-                  <div className="rounded-lg bg-gray-50 p-4 dark:bg-gray-800">
-                    {services
-                      .filter(
-                        (service) =>
-                          `${service.source_type}:${service.source_id}` ===
-                          selectedService,
-                      )
-                      .map((service) => (
-                        <div
-                          key={`${service.source_type}:${service.source_id}`}
-                          className="flex items-center justify-between gap-3"
-                        >
-                          <div>
-                            <p className="font-medium">
-                              {service.service_name}
+                {selectedServiceData && (
+                  <div className="space-y-4 rounded-lg bg-gray-50 p-4 dark:bg-gray-800">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-medium">
+                          {selectedServiceData.service_name}
+                        </p>
+                        <p className="mt-1 text-xs capitalize text-gray-500 dark:text-gray-400">
+                          {selectedServiceData.source_type} ·{" "}
+                          {selectedServiceData.customer_name}
+                        </p>
+                      </div>
+                      <p className="text-lg font-bold">
+                        {formatCurrency(subtotal)}
+                      </p>
+                    </div>
+
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950">
+                      <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                        Customer loyalty points
+                      </p>
+                      <p className="mt-1 text-sm text-amber-800 dark:text-amber-300">
+                        Available balance: {availablePoints} points
+                      </p>
+                      <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
+                        Redeem 100 points for ₹10 off.
+                      </p>
+
+                      {selectedServiceData.customer_id ? (
+                        <div className="mt-3">
+                          <label
+                            htmlFor="redeem-points"
+                            className="mb-2 block text-sm font-medium text-gray-900 dark:text-white"
+                          >
+                            Points to redeem
+                          </label>
+
+                          <select
+                            id="redeem-points"
+                            value={validPointsRedeemed}
+                            onChange={(event) =>
+                              setPointsRedeemed(Number(event.target.value))
+                            }
+                            disabled={maxRedeemablePoints === 0}
+                            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-blue-500 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                          >
+                            <option value={0}>Do not redeem points</option>
+
+                            {Array.from(
+                              {
+                                length: maxRedeemablePoints / 100,
+                              },
+                              (_, index) => (index + 1) * 100,
+                            ).map((points) => (
+                              <option key={points} value={points}>
+                                {points} points —{" "}
+                                {formatCurrency((points / 100) * 10)} off
+                              </option>
+                            ))}
+                          </select>
+
+                          {availablePoints > 0 && maxRedeemablePoints === 0 && (
+                            <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                              Points cannot exceed the service price.
                             </p>
-                            <p className="mt-1 text-xs capitalize text-gray-500 dark:text-gray-400">
-                              {service.source_type} · {service.customer_name}
-                            </p>
-                          </div>
-                          <p className="text-lg font-bold">
-                            {formatCurrency(service.amount)}
-                          </p>
+                          )}
                         </div>
-                      ))}
+                      ) : (
+                        <p className="mt-3 text-xs text-gray-600 dark:text-gray-300">
+                          This walk-in service is not linked to a registered
+                          customer. Loyalty redemption is unavailable.
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="space-y-2 border-t border-gray-200 pt-3 text-sm dark:border-gray-700">
+                      <div className="flex justify-between gap-3">
+                        <span>Subtotal</span>
+                        <span>{formatCurrency(subtotal)}</span>
+                      </div>
+                      <div className="flex justify-between gap-3 text-green-600">
+                        <span>
+                          Loyalty discount ({validPointsRedeemed} points)
+                        </span>
+                        <span>-{formatCurrency(discountAmount)}</span>
+                      </div>
+                      <div className="flex justify-between gap-3 border-t border-gray-300 pt-3 text-base font-bold dark:border-gray-600">
+                        <span>Final amount</span>
+                        <span>{formatCurrency(finalAmount)}</span>
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -311,6 +442,7 @@ export default function OwnerPayments() {
                   >
                     Payment method
                   </label>
+
                   <select
                     id="payment-method"
                     value={paymentMethod}
@@ -340,7 +472,6 @@ export default function OwnerPayments() {
             )}
           </section>
 
-          {/* Professional invoice preview */}
           <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
             <h2 className="no-print text-lg font-semibold">
               Professional Invoice
@@ -348,12 +479,11 @@ export default function OwnerPayments() {
 
             {!activeReceipt ? (
               <div className="no-print mt-5 rounded-lg border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500 dark:border-gray-700">
-                Record a payment or select a receipt from history to preview the
-                invoice.
+                Record a payment or select a receipt from the history to preview
+                the invoice.
               </div>
             ) : (
               <div className="receipt-print mx-auto mt-5 max-w-2xl border border-gray-200 bg-white p-6 text-gray-900 shadow-sm sm:p-8">
-                {/* Shop details */}
                 <div className="flex items-start justify-between gap-4 border-b-2 border-gray-900 pb-5">
                   <div>
                     <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-gray-900 text-lg font-bold text-white">
@@ -375,17 +505,14 @@ export default function OwnerPayments() {
                         {activeReceipt.shop_address}
                       </p>
                     )}
-
                     {activeReceipt.shop_city && (
                       <p className="text-sm">{activeReceipt.shop_city}</p>
                     )}
-
                     {activeReceipt.shop_phone && (
                       <p className="mt-2 text-sm">
                         Phone: {activeReceipt.shop_phone}
                       </p>
                     )}
-
                     {activeReceipt.shop_email && (
                       <p className="text-sm">{activeReceipt.shop_email}</p>
                     )}
@@ -407,7 +534,6 @@ export default function OwnerPayments() {
                   </div>
                 </div>
 
-                {/* Customer and payment details */}
                 <div className="mt-6 grid grid-cols-2 gap-5">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
@@ -440,7 +566,6 @@ export default function OwnerPayments() {
                   </div>
                 </div>
 
-                {/* Service breakdown */}
                 <div className="mt-7">
                   <table className="w-full border-collapse text-left text-sm">
                     <thead>
@@ -462,26 +587,32 @@ export default function OwnerPayments() {
                           </p>
                         </td>
                         <td className="px-3 py-5 text-right font-semibold">
-                          {formatCurrency(activeReceipt.amount)}
+                          {formatCurrency(receiptSubtotal)}
                         </td>
                       </tr>
                     </tbody>
                   </table>
                 </div>
 
-                {/* Invoice totals */}
-                <div className="ml-auto mt-5 max-w-xs space-y-3">
-                  <div className="flex justify-between gap-4 text-sm">
+                <div className="ml-auto mt-5 max-w-xs space-y-3 text-sm">
+                  <div className="flex justify-between gap-4">
                     <span>Subtotal</span>
-                    <span>{formatCurrency(activeReceipt.amount)}</span>
+                    <span>{formatCurrency(receiptSubtotal)}</span>
                   </div>
+
+                  {receiptPoints > 0 && (
+                    <div className="flex justify-between gap-4 text-green-700">
+                      <span>Loyalty discount ({receiptPoints} points)</span>
+                      <span>-{formatCurrency(receiptDiscount)}</span>
+                    </div>
+                  )}
+
                   <div className="flex justify-between gap-4 border-t-2 border-gray-900 pt-3 text-lg font-extrabold">
                     <span>Total paid</span>
                     <span>{formatCurrency(activeReceipt.amount)}</span>
                   </div>
                 </div>
 
-                {/* Invoice footer */}
                 <div className="mt-8 border-t border-dashed border-gray-300 pt-5 text-center">
                   <p className="font-semibold">Thank you for choosing us!</p>
                   <p className="mt-1 text-xs text-gray-500">
@@ -504,7 +635,6 @@ export default function OwnerPayments() {
           </section>
         </div>
 
-        {/* Payment history */}
         <section className="no-print overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
           <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-5 dark:border-gray-800">
             <div>
@@ -535,7 +665,7 @@ export default function OwnerPayments() {
               <table className="w-full min-w-[700px] text-left text-sm">
                 <thead className="bg-gray-50 text-gray-600 dark:bg-gray-800 dark:text-gray-300">
                   <tr>
-                    <th className="px-5 py-3 font-medium">Invoice</th>
+                    <th className="px-5 py-3 font-medium">Receipt</th>
                     <th className="px-5 py-3 font-medium">Customer</th>
                     <th className="px-5 py-3 font-medium">Service</th>
                     <th className="px-5 py-3 font-medium">Amount</th>
@@ -544,6 +674,7 @@ export default function OwnerPayments() {
                     <th className="px-5 py-3 font-medium">Action</th>
                   </tr>
                 </thead>
+
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                   {receipts.map((receipt) => (
                     <tr
@@ -562,7 +693,7 @@ export default function OwnerPayments() {
                         {receipt.payment_method}
                       </td>
                       <td className="px-5 py-4">
-                        {formatDate(receipt.paid_at)}
+                        {formatDate(receipt.paid_at || receipt.created_at)}
                       </td>
                       <td className="px-5 py-4">
                         <button
@@ -570,7 +701,7 @@ export default function OwnerPayments() {
                           onClick={() => viewReceipt(receipt.id)}
                           className="font-medium text-blue-600 hover:underline dark:text-blue-400"
                         >
-                          View invoice
+                          View receipt
                         </button>
                       </td>
                     </tr>
