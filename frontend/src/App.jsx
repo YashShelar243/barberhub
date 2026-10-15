@@ -18,6 +18,7 @@ import OwnerReportsPage from "./pages/owner/OwnerReportsPage";
 import OwnerQueue from "./pages/owner/OwnerQueue";
 import OwnerPayments from "./pages/owner/OwnerPayments";
 import OwnerExpenses from "./pages/owner/OwnerExpenses";
+import OwnerCustomers from "./pages/owner/OwnerCustomers";
 
 import CustomerDashboard from "./pages/customer/CustomerDashboard";
 import CustomerShops from "./pages/customer/CustomerShops";
@@ -58,6 +59,7 @@ function AppRoutes() {
           <Route path="/owner/queue" element={<OwnerQueue />} />
           <Route path="/owner/payments" element={<OwnerPayments />} />
           <Route path="/owner/expenses" element={<OwnerExpenses />} />
+          <Route path="/owner/customers" element={<OwnerCustomers />} />
         </Route>
 
         {/* Admin routes */}
